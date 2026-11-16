@@ -224,7 +224,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.6.5 · 2026-11-17";
+const VERSION="v0.6.6 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -274,7 +274,7 @@ function onTick(sym,price,tms){
   checkStops(sym); markDirty(sym);
 }
 /* Forex: Finnhub websocket */
-let fxWs=null, fxRetry=0;
+let fxWs=null, fxRetry=0, fxQuick=0, fxWarned=false;
 function cleanKey(k){k=String(k||"").replace(/\s+/g,"");if(k.length%2===0&&k.length>=32&&k.slice(0,k.length/2)===k.slice(k.length/2))k=k.slice(0,k.length/2);return k}
 function connectFx(){
   const key=cleanKey(S.settings.key); if(key!==S.settings.key){S.settings.key=key;save()}
@@ -283,11 +283,15 @@ function connectFx(){
   if(!key){setState("fx","off","ยังไม่มี key");return}
   setState("fx","wait","กำลังต่อ…");
   let ws;try{ws=new WebSocket("wss://ws.finnhub.io?token="+encodeURIComponent(key))}catch(e){setState("fx","err","เน็ตถูกบล็อก");netBlocked("websocket");return} fxWs=ws;
-  ws.onopen=()=>{fxRetry=0;setState("fx","live","สด");for(const s in SYMS) if(SYMS[s].fh) ws.send(JSON.stringify({type:"subscribe",symbol:SYMS[s].fh}))};
+  ws.onopen=()=>{ws._t=Date.now();setState("fx","live","สด");for(const s in SYMS) if(SYMS[s].fh) ws.send(JSON.stringify({type:"subscribe",symbol:SYMS[s].fh}))};
   ws.onmessage=e=>{let d;try{d=JSON.parse(e.data)}catch(x){return}
     if(d.type==="trade"&&Array.isArray(d.data)) for(const t of d.data){const s=FH_REV[t.s]; if(s) onTick(s,+t.p,+t.t)}
     else if(d.type==="error") {setState("fx","err",String(d.msg||"error").slice(0,40))}};
-  ws.onclose=()=>{if(fxWs!==ws)return;setState("fx","err","หลุด · ต่อใหม่");setTimeout(connectFx,Math.min(30000,2000*2**fxRetry++))};
+  ws.onclose=()=>{if(fxWs!==ws)return;
+    /* v0.6.6: Finnhub lets ONE open connection per key — if it keeps dropping right after connecting, the key is in use elsewhere */
+    const quick=ws._t&&Date.now()-ws._t<15000;fxQuick=quick?fxQuick+1:0;if(ws._t&&!quick)fxRetry=0;
+    if(fxQuick>=3){setState("fx","err","key ถูกใช้อยู่อีกที่");if(!fxWarned){fxWarned=true;learn("⚠️ Forex หลุดซ้ำทันทีหลังต่อ: Finnhub แผนฟรีเปิดได้ 1 ที่ต่อ key ถ้าเปิด Quant Vault ทั้งบน Mac และบนเว็บ/มือถือด้วย key เดียวกัน จะแย่งกัน · แก้: ใช้ Finnhub key แยกสำหรับแต่ละที่ (สมัครฟรีได้) หรือปิดอีกที่");toast("Finnhub key นี้ถูกใช้อยู่อีกที่ ดูบันทึกการพัฒนา")}setTimeout(connectFx,60000);return}
+    setState("fx","err","หลุด · ต่อใหม่");setTimeout(connectFx,Math.min(30000,2000*2**fxRetry++))};
   ws.onerror=()=>{};
 }
 const FH_REV={}; for(const s in SYMS) if(SYMS[s].fh) FH_REV[SYMS[s].fh]=s;
