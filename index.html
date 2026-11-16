@@ -224,7 +224,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.6.8 · 2026-11-17";
+const VERSION="v0.6.9 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -321,6 +321,14 @@ async function backfillCrypto(sym){
 function setState(which,cls,txt){const d=document.getElementById(which==="fx"?"fxDot":"crDot");d.className="dot "+(cls==="live"?"live":cls==="err"?"err":"");document.getElementById(which==="fx"?"fxState":"crState").textContent=txt}
 
 /* ===================== pricing helpers ===================== */
+/* v0.6.9: forex/gold market hours (Sun 22:00 – Fri 22:00 UTC, i.e. Mon 05:00 – Sat 05:00 BKK; holidays not modelled) */
+function fxOpenNow(){const d=new Date(),wd=d.getUTCDay(),h=d.getUTCHours();return !((wd===5&&h>=22)||wd===6||(wd===0&&h<22))}
+function fxNearClose(){const d=new Date();return d.getUTCDay()===5&&(d.getUTCHours()*60+d.getUTCMinutes())>=21*60+30}  /* last 30 min before the weekend */
+function tradable(sym,who){const c=SYMS[sym];if(c.grp!=="FX")return true;
+  if(!fxOpenNow()){if(who)toast("ตลาด Forex/ทองคำปิด (เสาร์ 05:00 – จันทร์ 05:00 น. ไทย) ยังเปิดไม้ใหม่ไม่ได้");return false}
+  if(Date.now()-(M[sym].t||0)>5*60000){if(who)toast("ราคา "+c.name+" ไม่ขยับเกิน 5 นาที (ราคาค้าง) ยังเปิดไม้ไม่ได้");return false}
+  if(who!=="you"&&fxNearClose())return false;   /* bot: no new forex entries in the last 30 min before the weekend gap */
+  return true}
 function spreadAbs(sym){const c=SYMS[sym],p=M[sym].last||0;return c.spreadPct?p*c.spreadPct:c.spread*c.pip}
 /* v0.5.2: round-trip cost per unit in price terms = spread + exchange fee both sides (crypto 0.1%/side) */
 function costPx(sym,price){const c=SYMS[sym];price=price||M[sym].last||0;return spreadAbs(sym)+(c.fee?2*c.fee*price:0)}
@@ -508,6 +516,7 @@ function botStatus(k){const B=S.bot.brains[k];
     :'<span class="neg" title="แชมป์ที่ยังไม่ติดลบมีน้ำหนักต่ำกว่า 60% ของตัวที่นำ (ตัวนำอาจเป็นตัวท้าชิงที่ยังไม่ได้เลื่อนขั้น) บอทจึงพักไว้จนกว่าสมองจะมั่นใจขึ้น">⏸ พัก: ยังไม่มีแชมป์ผ่านเกณฑ์</span>'}
 function botAct(sym,fired,A){
   if(S.bot.mode==="off") return;
+  if(!tradable(sym,"bot")) return; /* v0.6.9: forex market hours / stale price */
   if(SYMS[sym].grp==="CR"&&cbActive()) return; /* v0.6: crypto entries come from the cloud swarm brain */
   const maxW=Math.max(...agents(sym).map(a=>a.w));
   const pick=fired.filter(f=>pickable(f.ag,maxW)).sort((x,y)=>y.ag.w-x.ag.w)[0];
@@ -667,7 +676,7 @@ function renderAlert(big){const A=S.alerts,bar=$("lossBar");
   $("ackLoss").onclick=()=>{A.unseen=0;save();renderAlert();renderAlerts()};renderAlerts()}
 function renderAlerts(){const el=$("t-alerts");if(!el)return;const L=S.alerts.log;
   el.innerHTML=`<div class="alog">${L.length?L.slice(0,100).map(a=>`<div class="${a.big?"big":""}">${new Date(a.at).toLocaleString("th-TH")} · <b>${esc(a.title)}</b> · ${esc(a.body)}</div>`).join(""):"ยังไม่มีการขาดทุน 🎉"}</div>`}
-function chargeSwaps(){const now=new Date();if(now.getUTCHours()<22)return;const day=now.toISOString().slice(0,10);let ch=0;
+function chargeSwaps(){const now=new Date();if(now.getUTCHours()<22)return;if(now.getUTCDay()===6||now.getUTCDay()===0)return; /* v0.6.9: no weekend rollover (Wed x3 covers it) */const day=now.toISOString().slice(0,10);let ch=0;
   for(const p of S.acct.positions){const r=SWAP_PER_LOT[p.sym];if(!r||p.swapDay===day)continue;if(p.open>Date.parse(day+"T22:00:00Z"))continue;
     const cost=r*p.size*(now.getUTCDay()===3?3:1);p.swap=(p.swap||0)+cost;p.swapDay=day;S.acct.bal-=cost;ch+=cost}
   if(ch>0){save();learn(`ค่า swap ค้างคืน −${money(ch)} USD (ไม้ Forex/ทองที่ถือข้ามเวลา 05:00)`);renderAll()}}
@@ -682,8 +691,8 @@ function checkLossAlerts(){
 /* ===================== events ===================== */
 $("syms").addEventListener("click",e=>{const b=e.target.closest("[data-s]");if(!b)return;curSym=S.ui.sym=b.dataset.s;save();renderSyms();redrawChart();renderAll();backfillCrypto(curSym);warmBot(curSym)});
 $("tfs").addEventListener("click",e=>{const b=e.target.closest("[data-tf]");if(!b)return;S.ui.tf=+b.dataset.tf;save();renderTfs();redrawChart()});
-$("buyBtn").onclick=()=>openPos(curSym,1,+$("lot").value,+$("sl").value,+$("tp").value,"you");
-$("sellBtn").onclick=()=>openPos(curSym,-1,+$("lot").value,+$("sl").value,+$("tp").value,"you");
+$("buyBtn").onclick=()=>tradable(curSym,"you")&&openPos(curSym,1,+$("lot").value,+$("sl").value,+$("tp").value,"you");
+$("sellBtn").onclick=()=>tradable(curSym,"you")&&openPos(curSym,-1,+$("lot").value,+$("sl").value,+$("tp").value,"you");
 $("t-positions").addEventListener("click",e=>{const b=e.target.closest("[data-close]");if(b)closePos(b.dataset.close,"มือ")});
 $("t-history").addEventListener("click",e=>{if(e.target.id!=="csv")return;const rows=[["close_time","symbol","side","size","entry","exit","reason","R","net_usd","usd_thb","net_thb","tax_est_thb","by","strategy"]].concat(S.acct.history.map(t=>[new Date(t.close).toISOString(),t.sym,t.dir>0?"BUY":"SELL",t.size,t.entry,t.exit,t.reason||"",t.R??"",t.net.toFixed(2),t.thb,(t.net*t.thb).toFixed(2),(t.tax||0).toFixed(2),t.by,t.strat||""]));
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+rows.map(r=>r.join(",")).join("\n")],{type:"text/csv"}));a.download="quant-vault-trades.csv";a.click()});
@@ -869,6 +878,7 @@ if(!S.acct.dayDate){S.acct.bal=+S.settings.start}
 initChart(); renderSyms(); renderTfs(); renderAll(); redrawChart(); requestAnimationFrame(frame);
 if(new URLSearchParams(location.search).has("selftest")) window.__selftest=true; else { if(inSandbox()) netBlocked("sandbox"); loadBars(); connectFx(); connectCrypto(); for(const s in SYMS) if(SYMS[s].bn) backfillCrypto(s); setTimeout(()=>backfillFxAll(false),1500); setInterval(()=>tdSync(false),15*60*1000); setInterval(saveBars,30000); window.addEventListener("beforeunload",saveBars); setTimeout(()=>{try{redrawChart()}catch(e){}},500); }
 setInterval(renderBanner,3000);
+setInterval(()=>{try{const el=document.getElementById("fxState");if(el&&!fxOpenNow()&&!/ตลาดปิด/.test(el.textContent))el.textContent+=" · ตลาดปิด"}catch(e){}},5000); /* v0.6.9 */
 if(!window.__selftest){cbLoadScript();setInterval(cbLoadScript,15*60*1000);setTimeout(cloudTick,8000);setInterval(cloudTick,60*1000);}
 if(S.bot.migr52!=null&&!S.bot.migr52logged){S.bot.migr52logged=1;learn(`อัปเดต v0.5.2: ไม้เงาเดิมไม่ได้หักค่าธรรมเนียม 0.1%/ข้าง สถิติเก่า ${S.bot.migr52} กลยุทธ์ถูกเก็บไว้ดูย้อนหลัง พารามิเตอร์/แชมป์เดิมยังอยู่ เริ่มวัดผลใหม่หลังหักต้นทุนจริง · ขนาดไม้คิดความเสี่ยง 1% รวมสเปรด+ค่าธรรมเนียม`)}
 if(!S.bot.log.length) learn(`เริ่มต้น ${VERSION}: 4 ตระกูลกลยุทธ์พร้อมเทรดเงา · Guardian เสี่ยง ${S.settings.risk}%/ไม้ เพดานขาดทุน ${S.settings.dayLoss}%/วัน`);
