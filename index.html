@@ -224,7 +224,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.6.9 · 2026-11-17";
+const VERSION="v0.7.0 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -526,6 +526,9 @@ function botAct(sym,fired,A){
   const g=guardian(); renderGuard(g); if(!g.ok) return;
   if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===sym)) return; /* one bot position per symbol */
   const c=SYMS[sym], slDist=A*pick.ag.sl, tpDist=A*pick.ag.tp;
+  /* v0.7.0 safety: an SL thinner than the costs can't be won and is jumped over by the next sparse tick (USD/THB −8.8R, −5.4R) */
+  const costR=costPx(sym)/slDist;
+  if(slDist<3*spreadAbs(sym)||costR>0.35){const k="skipc_"+sym;if(!S.bot[k]||Date.now()-S.bot[k]>3600e3){S.bot[k]=Date.now();learn(`↷ ข้ามไม้ ${c.name} ${pick.s>0?"BUY":"SELL"}: SL แคบเกินต้นทุน (ต้นทุนไปกลับ = ${(costR*100).toFixed(0)}% ของ SL, SL ${(slDist/c.pip).toFixed(1)} pip vs สเปรด ${(spreadAbs(sym)/c.pip).toFixed(1)} pip) · ไม้แบบนี้เคยทำให้ขาดทุนเกิน 5R`)}return}
   const riskUsd=equity()*S.settings.risk/100, perUnit=(slDist+costPx(sym))*usdPerQuote(sym,M[sym].last); /* v0.5.2: 1% risk includes spread+fees */
   let size=riskUsd/perUnit/c.lot; if(!(size>0)) return;
   const m1=marginUsd({sym,size:1,entry:M[sym].last}), freeM=equity()-usedMargin(); if(m1>0) size=Math.min(size,0.25*freeM/m1); /* v0.5: never use >25% of free margin on one bot trade */
@@ -874,7 +877,7 @@ async function backfillFxAll(force){
   if(S.settings.tdKey)return tdSync(force);
   for(const s in SYMS) if(SYMS[s].fh){await backfillFx(s);await new Promise(r=>setTimeout(r,1200))}}
 /* ===================== boot ===================== */
-if(!S.acct.dayDate){S.acct.bal=+S.settings.start}
+if(!S.acct.dayDate&&!S.acct.history.length&&!S.acct.positions.length){S.acct.bal=+S.settings.start} /* v0.7.0: never reset an existing account */
 initChart(); renderSyms(); renderTfs(); renderAll(); redrawChart(); requestAnimationFrame(frame);
 if(new URLSearchParams(location.search).has("selftest")) window.__selftest=true; else { if(inSandbox()) netBlocked("sandbox"); loadBars(); connectFx(); connectCrypto(); for(const s in SYMS) if(SYMS[s].bn) backfillCrypto(s); setTimeout(()=>backfillFxAll(false),1500); setInterval(()=>tdSync(false),15*60*1000); setInterval(saveBars,30000); window.addEventListener("beforeunload",saveBars); setTimeout(()=>{try{redrawChart()}catch(e){}},500); }
 setInterval(renderBanner,3000);
