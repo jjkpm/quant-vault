@@ -224,7 +224,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.6.6 · 2026-11-17";
+const VERSION="v0.6.7 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -289,8 +289,8 @@ function connectFx(){
     else if(d.type==="error") {setState("fx","err",String(d.msg||"error").slice(0,40))}};
   ws.onclose=()=>{if(fxWs!==ws)return;
     /* v0.6.6: Finnhub lets ONE open connection per key — if it keeps dropping right after connecting, the key is in use elsewhere */
-    const quick=ws._t&&Date.now()-ws._t<15000;fxQuick=quick?fxQuick+1:0;if(ws._t&&!quick)fxRetry=0;
-    if(fxQuick>=3){setState("fx","err","key ถูกใช้อยู่อีกที่");if(!fxWarned){fxWarned=true;learn("⚠️ Forex หลุดซ้ำทันทีหลังต่อ: Finnhub แผนฟรีเปิดได้ 1 ที่ต่อ key ถ้าเปิด Quant Vault ทั้งบน Mac และบนเว็บ/มือถือด้วย key เดียวกัน จะแย่งกัน · แก้: ใช้ Finnhub key แยกสำหรับแต่ละที่ (สมัครฟรีได้) หรือปิดอีกที่");toast("Finnhub key นี้ถูกใช้อยู่อีกที่ ดูบันทึกการพัฒนา")}setTimeout(connectFx,60000);return}
+    const quick=!ws._t||Date.now()-ws._t<15000;fxQuick=quick?fxQuick+1:0;if(!quick)fxRetry=0; /* v0.6.7: also count connections refused before they open */
+    if(fxQuick>=3){setState("fx","err",ws._t?"key ถูกใช้อยู่อีกที่":"ต่อไม่ได้: key ใช้อยู่อีกที่/ไม่ถูกต้อง");if(!fxWarned){fxWarned=true;learn("⚠️ Forex หลุดซ้ำทันทีหลังต่อ: Finnhub แผนฟรีเปิดได้ 1 ที่ต่อ key ถ้าเปิด Quant Vault ทั้งบน Mac และบนเว็บ/มือถือด้วย key เดียวกัน จะแย่งกัน · แก้: ใช้ Finnhub key แยกสำหรับแต่ละที่ (สมัครฟรีได้) หรือปิดอีกที่");toast("Finnhub key นี้ถูกใช้อยู่อีกที่ ดูบันทึกการพัฒนา")}setTimeout(connectFx,60000);return}
     setState("fx","err","หลุด · ต่อใหม่");setTimeout(connectFx,Math.min(30000,2000*2**fxRetry++))};
   ws.onerror=()=>{};
 }
