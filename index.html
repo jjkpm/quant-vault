@@ -224,7 +224,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.6.7 · 2026-11-17";
+const VERSION="v0.6.8 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -308,8 +308,8 @@ function connectCrypto(){
 }
 async function backfillCrypto(sym){
   const c=SYMS[sym]; if(!c.bn) return;
-  for(const [tf,iv] of [[60,"1m"],[300,"5m"],[900,"15m"]]){
-    try{const r=await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=${c.bn.toUpperCase()}&interval=${iv}&limit=500`);const k=await r.json();
+  for(const [tf,iv] of [[1,"1s"],[60,"1m"],[300,"5m"],[900,"15m"]]){ /* v0.6.8: 1s history too, so the 1s chart isn't empty after a reload */
+    try{const r=await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=${c.bn.toUpperCase()}&interval=${iv}&limit=${tf===1?900:500}`);const k=await r.json();
       if(Array.isArray(k)&&k.length){const live=M[sym].bars[tf];const lastLive=live[live.length-1];
         const hist=k.map(x=>({time:Math.floor(x[0]/1000),open:+x[1],high:+x[2],low:+x[3],close:+x[4]})).filter(b=>!lastLive||b.time<live[0].time);
         M[sym].bars[tf]=hist.concat(live).slice(-CAP[tf]); if(M[sym].first==null) M[sym].first=hist[0].open;
@@ -802,9 +802,9 @@ document.addEventListener("click",e=>{if(e.target&&e.target.id==="cbToggle"){S.c
 /* ===================== v0.6.2: forex candles survive reloads + history backfill ===================== */
 /* Forex had no history source: bars were built only from live ticks and lost on every reload, so the 15m chart looked empty. */
 const BARS_KEY="quantvault.bars.v1";
-function saveBars(){if(window.__selftest)return;try{const o={};for(const s in SYMS)if(SYMS[s].grp==="FX")o[s]={60:M[s].bars[60],300:M[s].bars[300],900:M[s].bars[900]};localStorage.setItem(BARS_KEY,JSON.stringify({t:Date.now(),o}))}catch(e){}}
+function saveBars(){if(window.__selftest)return;try{const o={};for(const s in SYMS)if(SYMS[s].grp==="FX")o[s]={1:M[s].bars[1].slice(-600),60:M[s].bars[60],300:M[s].bars[300],900:M[s].bars[900]}; /* v0.6.8: keep 1s too */localStorage.setItem(BARS_KEY,JSON.stringify({t:Date.now(),o}))}catch(e){}}
 function loadBars(){try{const d=JSON.parse(localStorage.getItem(BARS_KEY)||"null");if(!d||!d.o)return 0;let n=0;
-  for(const s in d.o){if(!M[s])continue;for(const tf of [60,300,900]){const old=(d.o[s][tf]||[]).filter(b=>b&&isFinite(b.close));const live=M[s].bars[tf];
+  for(const s in d.o){if(!M[s])continue;for(const tf of [1,60,300,900]){const old=(d.o[s][tf]||[]).filter(b=>b&&isFinite(b.close));const live=M[s].bars[tf];
     const first=live.length?live[0].time:Infinity;M[s].bars[tf]=old.filter(b=>b.time<first).concat(live).slice(-CAP[tf]);n+=old.length}
   }return n}catch(e){return 0}} /* never set M[s].last from stored bars: prices for trading come only from live ticks */
 async function backfillFx(sym){ /* Finnhub forex candles: works only if the user's Finnhub plan includes them (free plans often get 403) */
