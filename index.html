@@ -224,7 +224,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.7.0 · 2026-11-17";
+const VERSION="v0.7.1 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -723,9 +723,16 @@ S.cloud=S.cloud||{on:true,brain:null,lastBar:{},loadedAt:0};
 const CB_TFS=[15,60,240], CB_IV={15:"15m",60:"1h",240:"4h"};
 const CB_TAG={against4h:"สวนเทรนด์ 4 ชม.",newswin:"ช่วงข่าวแรง",newsagainst:"สวนทางข่าว",volspike:"ผันผวนสูงผิดปกติ",highcost:"ต้นทุนสูงเมื่อเทียบกับ SL",weakvote:"เสียงโหวตก้ำกึ่ง"};
 const CB_FAM={ema:"EMA cross",rsi:"RSI reversion",don:"Donchian breakout",bb:"Bollinger reversion",trend:"EMA trend re-entry",mom:"Momentum burst",squeeze:"Volatility squeeze",pull:"Trend pullback"};
-function cbLoadScript(){try{const old=document.getElementById("cbScript");if(old)old.remove();const sc=document.createElement("script");sc.id="cbScript";sc.src="brain.js?t="+Date.now();
-  sc.onload=()=>{const b=window.QV_CLOUD_BRAIN;if(b&&b.agents&&(!S.cloud.brain||b.updated!==S.cloud.brain.updated)){S.cloud.brain=b;S.cloud.loadedAt=Date.now();save();learn(`☁️ โหลดสมองจาก cloud: รุ่น ${b.gen} · บอทโหวตได้ ${b.agents.length} ตัว · กฎที่เรียนจากความผิดพลาด ${b.rules.length?b.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี"}`);try{renderBrain()}catch(e){}}};
-  sc.onerror=()=>{};document.head.appendChild(sc)}catch(e){}}
+function cbApply(b,src){if(b&&b.agents&&(!S.cloud.brain||b.updated>S.cloud.brain.updated||(b.updated===S.cloud.brain.updated&&!S.cloud.loadedAt))){S.cloud.brain=b;S.cloud.loadedAt=Date.now();S.cloud.src=src;save();learn(`☁️ โหลดสมองจาก cloud: รุ่น ${b.gen} · บอทโหวตได้ ${b.agents.length} ตัว · กฎที่เรียนจากความผิดพลาด ${b.rules.length?b.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี"}`);try{renderBrain()}catch(e){}}}
+/* v0.7.1: on the website, read the brain straight from the public brain sheet (updated by the cloud swarm itself) — no file push needed.
+   file:// can't read it (no CORS for local files), so the Mac keeps using brain.js from the sync task. Both paths: the newer brain wins. */
+const CB_SHEET="https://docs.google.com/spreadsheets/d/166tNaVIDPA99SVjQwLv8Ym97KjZ6zHab2RXJ3Ne-n7A/gviz/tq?tqx=out:csv&range=A1";
+async function cbFetchSheet(){try{const r=await fetch(CB_SHEET+"&t="+Date.now(),{cache:"no-store"});if(!r.ok)return;let t=(await r.text()).trim();
+  if(t.startsWith('"'))t=t.slice(1,t.endsWith('"')?-1:undefined).replace(/""/g,'"');cbApply(JSON.parse(t),"sheet")}catch(e){}}
+function cbLoadScript(){
+  if(/^https?:/.test(location.protocol))cbFetchSheet();
+  try{const old=document.getElementById("cbScript");if(old)old.remove();const sc=document.createElement("script");sc.id="cbScript";sc.src="brain.js?t="+Date.now();
+  sc.onload=()=>cbApply(window.QV_CLOUD_BRAIN,"file");sc.onerror=()=>{};document.head.appendChild(sc)}catch(e){}}
 function cbActive(){return !!(S.cloud.on&&S.cloud.brain&&S.cloud.brain.agents&&S.cloud.brain.agents.length)}
 /* indicators (same math as the cloud engine) */
 const cbEma=(c,n)=>{const k=2/(n+1);let e=null;return c.map(v=>e=e==null?v:v*k+e*(1-k))};
