@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.8.0 · 2026-11-17";
+const VERSION="v0.8.1 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -605,6 +605,7 @@ function renderQuote(){const c=SYMS[curSym],m=M[curSym];$("symName").textContent
   $("spr").textContent=m.last!=null?(c.grp==="US"?"$"+spreadAbs(curSym).toFixed(3):(spreadAbs(curSym)/c.pip).toFixed(1)+" pip"):"—";
   $("lastTick").textContent=m.t?new Date(m.t).toLocaleTimeString("th-TH"):"—";
   if(m.first!=null&&m.last!=null){const d=(m.last-m.first)/m.first*100;$("chg").textContent=(d>=0?"+":"")+d.toFixed(3)+"% (ตั้งแต่เปิดแอป/ข้อมูลย้อนหลัง)";$("chg").className="num chg "+(d>=0?"up":"down")}
+  else{$("chg").textContent=c.grp==="US"&&!usOpenAt(Date.now())?"ตลาดหุ้น US ปิด · เปิด 21:30–04:00 น. ไทย":"";$("chg").className="num chg"}
   {const u=c.grp==="US"?"(เซนต์)":"(pip)";$("slLbl").textContent="SL "+u;$("tpLbl").textContent="TP "+u}
   $("lotUnit").textContent=c.grp==="CR"?"("+c.name.split("/")[0]+")":c.grp==="US"?"(หุ้น)":"(lot)";
   const sl=+$("sl").value,size=+$("lot").value; if(m.last){const r=(sl*c.pip+costPx(curSym))*units(curSym,size)*usdPerQuote(curSym,m.last);$("riskHint").textContent=`ถ้าโดน SL (รวมสเปรด+ค่าธรรมเนียม) จะเสียประมาณ ${money(r)} USD (${(r/equity()*100).toFixed(2)}% ของ equity)`}}
@@ -902,7 +903,9 @@ function aggBars(m1,tf){const out=[];for(const b of m1){const t=Math.floor(b.tim
 function mergeHist(sym,tf,hist){if(!hist.length)return;const live=M[sym].bars[tf],last=hist[hist.length-1].time,first=hist[0].time;
   const older=live.filter(b=>b.time<first),newer=live.filter(b=>b.time>last);
   M[sym].bars[tf]=older.concat(hist,newer).slice(-CAP[tf]);if(tf===S.settings.botTf)warmBot(sym);if(sym===curSym&&tf===S.ui.tf)redrawChart()}
-let tdBusy=false;
+let tdBusy=false,tdRetryT=null;
+const TD_PER_MIN=8; /* v0.8.1: Twelve Data free = 8 credits per MINUTE (1 per symbol); 11 symbols in one call hit that limit */
+function tdLater(force,sec){clearTimeout(tdRetryT);tdRetryT=setTimeout(()=>tdSync(force),sec*1000)}
 async function tdSync(force){
   const key=S.settings.tdKey;if(!key||tdBusy||window.__selftest)return;const st=tdState(),now=Math.floor(Date.now()/1000);
   const need=[];let gapMax=0;
@@ -911,17 +914,24 @@ async function tdSync(force){
     if(!force&&now-(st.last[s]||0)<1800)continue;                  /* fetched this pair < 30 min ago */
     need.push(s);gapMax=Math.max(gapMax,last?Math.ceil(gap/60)+5:5000)}
   if(!need.length)return;
+  const mn=st.min&&now-st.min.t<60?st.min:{t:now,n:0},avail=TD_PER_MIN-mn.n;   /* v0.8.1: stay inside the per-minute limit */
+  if(avail<=0){tdLater(force,62-(now-mn.t));return}
+  const more=need.length>avail;if(more)need.splice(avail);
   if(st.used+need.length>st.cap){learn(`⏸ งดดึง Twelve Data: วันนี้ใช้ไป ${st.used}/${st.cap} (เพดานที่แอปตั้งไว้ จากโควตาฟรี 800) · กราฟยังเดินจากราคาสดตามปกติ`);return}
   try{const lk=+localStorage.getItem(TD_KEY+".lock")||0;if(Date.now()-lk<60000)return;localStorage.setItem(TD_KEY+".lock",String(Date.now()))}catch(e){}  /* another tab is fetching */
   tdBusy=true;const names=need.map(tdName);
   try{const r=await fetch(`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(names.join(","))}&interval=1min&outputsize=${Math.min(5000,Math.max(30,gapMax))}&timezone=UTC&apikey=${encodeURIComponent(key)}`);
-    const d=await r.json();st.used+=need.length;let ok=[],bad=[];
-    if(d.code===429||/run out of API credits|limit/i.test(String(d.message||""))&&d.status==="error"){st.used=Math.max(st.used,st.cap);tdSave(st);learn("⏸ Twelve Data แจ้งว่าเครดิตวันนี้หมด: หยุดดึงถึง 07:00 น. (เวลาไทย) · กราฟยังเดินจากราคาสด");tdBusy=false;return}
+    const d=await r.json();let ok=[],bad=[];const msg=String(d.message||"");
+    if(d.status==="error"&&(d.code===429||/API credits|limit/i.test(msg))&&!/for the day|daily/i.test(msg)){ /* v0.8.1: per-MINUTE limit → just wait a minute (was wrongly treated as "used up for the day") */
+      st.min={t:now,n:TD_PER_MIN};tdSave(st);tdLater(force,65);try{localStorage.removeItem(TD_KEY+".lock")}catch(e){}tdBusy=false;return}
+    st.used+=need.length;st.min={t:mn.t,n:mn.n+need.length};
+    if(d.status==="error"&&/for the day|daily/i.test(msg)){st.used=Math.max(st.used,st.cap);tdSave(st);learn("⏸ Twelve Data แจ้งว่าเครดิตวันนี้หมด: หยุดดึงถึง 07:00 น. (เวลาไทย) · กราฟยังเดินจากราคาสด");tdBusy=false;return}
     need.forEach((s,i)=>{const v=need.length===1?d:d[names[i]];
       if(!v||v.status!=="ok"||!Array.isArray(v.values)){bad.push(SYMS[s].name+": "+String((v&&v.message)||d.message||"error").slice(0,50));return}
       const m1=v.values.map(x=>({time:Math.floor(Date.parse(x.datetime.replace(" ","T")+"Z")/1000/60)*60,open:+x.open,high:+x.high,low:+x.low,close:+x.close})).filter(b=>isFinite(b.close)).sort((a,b)=>a.time-b.time);
       mergeHist(s,60,m1);mergeHist(s,300,aggBars(m1,300));mergeHist(s,900,aggBars(m1,900));st.last[s]=now;ok.push(tdName(s))});
-    tdSave(st);save();saveBars();learn(`🕯️ Twelve Data: เติมกราฟ ${ok.join(", ")||"-"} (ใช้ ${need.length} เครดิต · วันนี้ ${st.used}/${st.cap})${bad.length?" · ไม่สำเร็จ: "+bad.join(" | "):""}`);
+    tdSave(st);save();saveBars();learn(`🕯️ Twelve Data: เติมกราฟ ${ok.join(", ")||"-"} (ใช้ ${need.length} เครดิต · วันนี้ ${st.used}/${st.cap})${bad.length?" · ไม่สำเร็จ: "+bad.join(" | "):""}${more?" · ที่เหลือดึงต่อในอีก 1 นาที (โควตาฟรี 8 เครดิต/นาที)":""}`);
+    if(more)tdLater(force,62);
   }catch(e){learn("⚠️ ดึง Twelve Data ไม่สำเร็จ: "+String(e.message||e).slice(0,80))}
   try{localStorage.removeItem(TD_KEY+".lock")}catch(e){}
   tdBusy=false}
@@ -937,6 +947,7 @@ setInterval(()=>{try{const el=document.getElementById("fxState");if(el&&!fxOpenN
 if(!window.__selftest){cbLoadScript();setInterval(cbLoadScript,15*60*1000);setTimeout(cloudTick,8000);setInterval(cloudTick,60*1000);}
 if(S.bot.migr52!=null&&!S.bot.migr52logged){S.bot.migr52logged=1;learn(`อัปเดต v0.5.2: ไม้เงาเดิมไม่ได้หักค่าธรรมเนียม 0.1%/ข้าง สถิติเก่า ${S.bot.migr52} กลยุทธ์ถูกเก็บไว้ดูย้อนหลัง พารามิเตอร์/แชมป์เดิมยังอยู่ เริ่มวัดผลใหม่หลังหักต้นทุนจริง · ขนาดไม้คิดความเสี่ยง 1% รวมสเปรด+ค่าธรรมเนียม`)}
 if(!S.bot.log.length) learn(`เริ่มต้น ${VERSION}: 4 ตระกูลกลยุทธ์พร้อมเทรดเงา · Guardian เสี่ยง ${S.settings.risk}%/ไม้ เพดานขาดทุน ${S.settings.dayLoss}%/วัน`);
+if(!S.bot.v81td){S.bot.v81td=1;try{const t=tdState();if(t.used>=t.cap){t.used=Math.min(t.used,60);tdSave(t)}}catch(e){}} /* v0.8.1: v0.8.0 could mark the whole day as used up after a per-minute limit */
 if(S.bot.v80tf===1){S.bot.v80tf=2;learn("อัปเดต v0.8.0: เปลี่ยน Timeframe ที่บอท Forex/หุ้นใช้จาก 1 นาที → 15 นาที เพราะแท่ง 1 นาทีทำให้ SL แคบกว่าต้นทุน (สเปรด+ค่าธรรมเนียม) บอทเลยต้องข้ามแทบทุกไม้ · เปลี่ยนกลับได้ในตั้งค่า")}
 if(!S.bot.v80log){S.bot.v80log=1;learn("อัปเดต v0.8.0: เพิ่ม Crypto 6 เหรียญ (BNB XRP DOGE ADA AVAX LINK · ใช้สมองฝูงบอท cloud) + ตลาดใหม่หุ้น US 5 ตัว (SPY QQQ NVDA AAPL TSLA · ตามเวลาตลาดนิวยอร์ก ซื้อได้อย่างเดียว ไม่ถือข้ามคืน) · บอทถือพร้อมกันได้ 8 ไม้ ความเสี่ยงรวม ≤5%")}
 renderAlert();
