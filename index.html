@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.8.4 · 2026-11-17";
+const VERSION="v0.8.5 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -797,8 +797,8 @@ setTimeout(()=>{if(window.__selftest)return;const any=Object.values(M).some(m=>m
    For BTC/ETH/SOL the swarm's voting bots decide entries + lot size on 15m/1h/4h; the old 1m bot stays for forex. */
 S.cloud=S.cloud||{on:true,brain:null,lastBar:{},loadedAt:0};
 const CB_TFS=[15,60,240], CB_IV={15:"15m",60:"1h",240:"4h"};
-const CB_TAG={against4h:"สวนเทรนด์ 4 ชม.",newswin:"ช่วงข่าวแรง",newsagainst:"สวนทางข่าว",volspike:"ผันผวนสูงผิดปกติ",highcost:"ต้นทุนสูงเมื่อเทียบกับ SL",weakvote:"เสียงโหวตก้ำกึ่ง"};
-const CB_FAM={ema:"EMA cross",rsi:"RSI reversion",don:"Donchian breakout",bb:"Bollinger reversion",trend:"EMA trend re-entry",mom:"Momentum burst",squeeze:"Volatility squeeze",pull:"Trend pullback",macd:"MACD cross",stoch:"Stochastic reversion",kelt:"Keltner breakout",supert:"Supertrend flip"};
+const CB_TAG={against4h:"สวนเทรนด์ 4 ชม.",newswin:"ช่วงข่าวแรง",newsagainst:"สวนทางข่าว",volspike:"ผันผวนสูงผิดปกติ",highcost:"ต้นทุนสูงเมื่อเทียบกับ SL",weakvote:"เสียงโหวตก้ำกึ่ง",lowrr:"R:R ต่ำกว่า 1:2",pivotblock:"แนวรับ/ต้าน Pivot ขวางทางกำไร"};
+const CB_FAM={ema:"EMA cross",rsi:"RSI reversion",don:"Donchian breakout",bb:"Bollinger reversion",trend:"EMA trend re-entry",mom:"Momentum burst",squeeze:"Volatility squeeze",pull:"Trend pullback",macd:"MACD cross",stoch:"Stochastic reversion",kelt:"Keltner breakout",supert:"Supertrend flip",pivot:"Pivot points"};
 function cbApply(b,src){if(b&&b.agents&&(!S.cloud.brain||b.updated>S.cloud.brain.updated||(b.updated===S.cloud.brain.updated&&!S.cloud.loadedAt))){S.cloud.brain=b;S.cloud.loadedAt=Date.now();S.cloud.src=src;save();learn(`☁️ โหลดสมองจาก cloud: รุ่น ${b.gen} · บอทโหวตได้ ${b.agents.length} ตัว · กฎที่เรียนจากความผิดพลาด ${b.rules.length?b.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี"}`);try{renderBrain()}catch(e){}}}
 /* v0.7.1: on the website, read the brain straight from the public brain sheet (updated by the cloud swarm itself) — no file push needed.
    file:// can't read it (no CORS for local files), so the Mac keeps using brain.js from the sync task. Both paths: the newer brain wins. */
@@ -816,6 +816,10 @@ function cbRsi(c,n){const o=new Array(c.length).fill(null);let g=0,l=0;for(let i
   if(i<=n){g+=up/n;l+=dn/n}else{g=(g*(n-1)+up)/n;l=(l*(n-1)+dn)/n}if(i>=n)o[i]=l===0?100:100-100/(1+g/l)}return o}
 function cbAtr(b,n=14){const o=new Array(b.length).fill(null);let a=null;for(let i=1;i<b.length;i++){const tr=Math.max(b[i][2]-b[i][3],Math.abs(b[i][2]-b[i-1][4]),Math.abs(b[i][3]-b[i-1][4]));a=a==null?tr:(a*(n-1)+tr)/n;o[i]=a}return o}
 function cbMsd(c,i,n){let m=0;for(let j=i-n+1;j<=i;j++)m+=c[j];m/=n;let v=0;for(let j=i-n+1;j<=i;j++)v+=(c[j]-m)**2;return [m,Math.sqrt(v/n)]}
+/* v0.8.5: daily pivot points (Thanat's formula) from the previous complete UTC day inside the bars — same as prev_day_hlc/pivots in the engine */
+function cbPrevDay(b,i){if(!b.length)return null;const d=Math.floor(b[i][0]/86400);if(Math.floor(b[0][0]/86400)>=d-1)return null;let g=null;
+  for(const x of b){if(Math.floor(x[0]/86400)!==d-1)continue;if(!g)g=[x[2],x[3],x[4]];else{g[0]=Math.max(g[0],x[2]);g[1]=Math.min(g[1],x[3]);g[2]=x[4]}}return g}
+function cbPivots([h,l,c]){const pp=(h+l+c)/3;return [pp,pp*2-l,pp*2-h,pp+(h-l),pp-(h-l)]}
 function cbSig(fam,b,p){ /* signal on the LAST closed bar only */
   const n=b.length,c=b.map(x=>x[4]),i=n-1;if(n<5)return 0;
   if(fam==="ema"){const F=cbEma(c,p.fast),L=cbEma(c,p.slow);if(i<p.slow+2)return 0;if(F[i-1]<=L[i-1]&&F[i]>L[i])return 1;if(F[i-1]>=L[i-1]&&F[i]<L[i])return -1;return 0}
@@ -837,6 +841,10 @@ function cbSig(fam,b,p){ /* signal on the LAST closed bar only */
     const ksAt=j=>(kAt(j)+kAt(j-1)+kAt(j-2))/3,k0=ksAt(i),k1=ksAt(i-1);if(k1<lo&&lo<=k0)return 1;if(k1>hi&&hi>=k0)return -1;return 0}
   if(fam==="kelt"){const N=p.n;if(i<N+2)return 0;const e=cbEma(c,N),at=cbAtr(b,N);
     const up=e[i]+p.m*at[i],up1=e[i-1]+p.m*at[i-1],dn=e[i]-p.m*at[i],dn1=e[i-1]-p.m*at[i-1];if(c[i]>up&&c[i-1]<=up1)return 1;if(c[i]<dn&&c[i-1]>=dn1)return -1;return 0}
+  if(fam==="pivot"){const hlc=cbPrevDay(b,i),lv=p.lv,mode=p.mode;if(!hlc||Math.floor(b[i-1][0]/86400)!==Math.floor(b[i][0]/86400))return 0;
+    const [pp,r1,s1,r2,s2]=cbPivots(hlc),R=lv===1?r1:r2,S=lv===1?s1:s2;
+    if(mode===0){if(c[i]>R&&c[i-1]<=R)return 1;if(c[i]<S&&c[i-1]>=S)return -1;return 0}
+    if(c[i-1]<S&&c[i]>=S)return 1;if(c[i-1]>R&&c[i]<=R)return -1;return 0}
   if(fam==="supert"){const N=p.n,at=cbAtr(b,N);let fu=null,fl=null,d=1,sig=0;
     for(let j=1;j<n;j++){const hl=(b[j][2]+b[j][3])/2,bu=hl+p.m*at[j],bl=hl-p.m*at[j];if(fu===null){fu=bu;fl=bl;continue}
       fu=(bu<fu||c[j-1]>fu)?bu:fu;fl=(bl>fl||c[j-1]<fl)?bl:fl;const nd=(d===-1&&c[j]>fu)?1:((d===1&&c[j]<fl)?-1:d);if(j===i)sig=(nd!==d&&j>=N+2)?nd:0;d=nd}
@@ -856,6 +864,8 @@ function cbDecide(sym,tf,b,b4){
   const tags=[];if(b4&&b4.length>=55){const c4=b4.map(x=>x[4]),e4=cbEma(c4,50),L=c4.length-1;const t4=(c4[L]>e4[L]&&e4[L]>e4[L-5])?1:(c4[L]<e4[L]&&e4[L]<e4[L-5])?-1:0;if(t4&&t4!==d)tags.push("against4h")}
   const atrs=cbAtr(b.slice(-120)).filter(x=>x).sort((x,y)=>x-y);if(atrs.length>30&&A>atrs[Math.floor(atrs.length*0.9)])tags.push("volspike");
   const cR=costPx(sym,e)/slD;if(cR>0.25)tags.push("highcost");if(Math.abs(score)<0.35)tags.push("weakvote");
+  if(tpm/slm<2)tags.push("lowrr"); /* v0.8.5: R:R < 1:2 (tested by the swarm, avoided only if it keeps losing) */
+  {const h=cbPrevDay(b,b.length-1);if(h){const [pp,r1,s1]=cbPivots(h);if((d===1&&e<r1&&r1<e+tpD)||(d===-1&&e-tpD<s1&&s1<e))tags.push("pivotblock")}}
   const bad=tags.filter(t=>(B.rules||[]).includes(t));if(bad.length)return {skip:`เลี่ยงตามบทเรียน: ${bad.map(t=>CB_TAG[t]).join(", ")}`};
   const n=side.reduce((x,a)=>x+a.n,0),w=side.reduce((x,a)=>x+a.wins,0),pw=n?w/n:0,rr=tpm/slm-cR,kelly=rr>0?pw-(1-pw)/rr:-1;
   if(kelly<=0)return {skip:"Kelly ติดลบ (สถิติของบอทที่โหวตยังไม่คุ้มเสี่ยง)"};
