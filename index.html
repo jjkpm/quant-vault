@@ -185,7 +185,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   <div class="tab" id="t-about">
     <div class="note" style="max-width:820px">
       <p><b>ทุกอย่างในแอปนี้เป็นเงินจำลอง</b> ราคามาจากตลาดจริงแบบ realtime แต่ไม่มีการส่งคำสั่งไปโบรกเกอร์จริง และไม่ใช่คำแนะนำการลงทุน</p>
-      <p><b>ข้อมูลราคา:</b> Forex/ทองคำ และหุ้น US จาก Finnhub ผ่าน WebSocket ต้องใช้ API key ฟรี · Crypto 9 เหรียญจาก Binance ผ่าน WebSocket ไม่ต้องใช้ key · ตลาด Forex ปิดเสาร์-อาทิตย์ · หุ้น US (SPY, QQQ, NVDA, AAPL, TSLA) เปิด 21:30–04:00 น. ไทยช่วงนี้ (22:30–05:00 ช่วงหน้าร้อนของสหรัฐ) จ.–ศ. หยุดวันหยุด NYSE · Crypto วิ่ง 24 ชม.</p>
+      <p><b>ข้อมูลราคา:</b> Forex/ทองคำ และหุ้น US จาก Finnhub ผ่าน WebSocket ต้องใช้ API key ฟรี · Crypto 9 เหรียญจาก Binance ผ่าน WebSocket ไม่ต้องใช้ key · ตลาด Forex ปิดเสาร์-อาทิตย์ · หุ้น US (SPY, QQQ, NVDA, AAPL, TSLA) เปิด 09:30–16:00 ตามเวลานิวยอร์ก จ.–ศ. = 21:30–04:00 น. ไทย ช่วงเวลามาตรฐานสหรัฐ (พ.ย.–มี.ค.) และ 20:30–03:00 น. ไทย ช่วงเวลาออมแสงสหรัฐ (มี.ค.–พ.ย.) · หยุดวันหยุด NYSE และบางวันปิดเร็ว 13:00 นิวยอร์ก (<span id="usHrsHelp">—</span>) · Crypto วิ่ง 24 ชม.</p>
       <p><b>หุ้น US (เงินจำลอง):</b> บัญชีเงินสด ไม่มีเลเวอเรจ ซื้อได้อย่างเดียว (ขายชอร์ตไม่ได้ เหมือนบัญชีหุ้นต่างประเทศของโบรกไทย) คิดค่าคอม 0.03%/ข้าง + สเปรด · บอทไม่ถือข้ามคืน: ปิดไม้หุ้นของบอทก่อนตลาดปิด 5 นาที และไม่เปิดไม้ใหม่ใน 20 นาทีสุดท้าย</p>
       <p><b>บอทเก่งขึ้นยังไง:</b> มี 4 ตระกูลกลยุทธ์ (EMA cross, RSI, Donchian breakout, Bollinger) ทุกตัวเทรด "เงา" พร้อมกันตลอด ทุกไม้ที่ปิดจะคำนวณน้ำหนักใหม่จากกำไรเฉลี่ยต่อไม้ (R) ที่หักความไม่แน่นอนตามจำนวนไม้แล้ว (ไม้น้อย = ยังไม่เชื่อมาก) และทุก 10 ไม้ ตัวที่แย่จะถูกกลายพันธุ์พารามิเตอร์เป็นตัวท้าชิง ถ้าท้าชิงทำได้ดีกว่าจะได้ตำแหน่งแทน บอทที่เทรดจริงในบัญชีจำลองจะเลือกตามกลยุทธ์ที่น้ำหนักสูงสุด</p>
       <p><b>บอทกับคุณเทรดพร้อมกันได้:</b> บอทเทรดคู่ที่เลือกไว้ในช่อง "คู่ที่บอทเทรด" ตลอดเวลา ไม่ว่าคุณจะเปิดดูกราฟคู่ไหน ส่วนคุณกด BUY/SELL เองได้ทุกคู่ ไม้ของบอทมี 🤖 กำกับ ไม้ของคุณไม่นับรวมในเพดานของบอท (บอทถือพร้อมกันได้สูงสุด 8 ไม้ · 1 ไม้/ตัว · ความเสี่ยงรวมทุกไม้ของบอทไม่เกิน 5% ของ equity) และปิดไม้ไหนก็ได้ด้วยปุ่ม "ปิด"</p>
@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.8.2 · 2026-11-17";
+const VERSION="v0.8.4 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -349,10 +349,23 @@ function nyParts(ms){const o={};for(const x of nyFmt.formatToParts(new Date(ms))
 function usSession(ms){const p=nyParts(ms);if(p.wd==="Sat"||p.wd==="Sun"||US_HOL.has(p.day))return null;return {open:570,close:US_EARLY.has(p.day)?780:960,min:p.min}}
 function usOpenAt(ms){const s=usSession(ms);return !!s&&s.min>=s.open&&s.min<s.close}
 function usMinsToClose(ms){const s=usSession(ms);return s&&s.min>=s.open&&s.min<s.close?s.close-s.min:null}
+/* v0.8.3: show US hours in Bangkok time computed from the real New York session (DST + early closes), not a fixed "21:30–04:00" (wrong from mid-March to early November) */
+const bkkFmt=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Bangkok",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
+const bkkDayFmt=new Intl.DateTimeFormat("th-TH",{timeZone:"Asia/Bangkok",weekday:"short",day:"numeric",month:"short"});
+function bkkHm(ms){return bkkFmt.format(new Date(ms))}
+function nyAt(day,min){const [y,m,d]=day.split("-").map(Number);for(const off of [5,4]){const ms=Date.UTC(y,m-1,d,0,min)+off*3600e3,p=nyParts(ms);if(p.day===day&&p.min===min)return ms}return Date.UTC(y,m-1,d,0,min)+5*3600e3}
+function usNextSession(ms){ms=ms||Date.now();   /* the session that is open now, or the next one: {open,close} in epoch ms */
+  for(let i=0;i<10;i++){const day=nyParts(ms+i*864e5).day,s=usSession(nyAt(day,720));if(!s)continue;
+    const o=nyAt(day,s.open),c=nyAt(day,s.close);if(c>ms)return {open:o,close:c,early:s.close<960}}return null}
+function durTh(m){m=Math.max(0,Math.round(m));const h=Math.floor(m/60);return (h?h+" ชม. ":"")+(m%60)+" นาที"}
+function usHoursTxt(ms){ms=ms||Date.now();const s=usNextSession(ms);if(!s)return "ดูเวลาตลาดไม่ได้";
+  const hrs=`${bkkHm(s.open)}–${bkkHm(s.close)} น. ไทย${s.early?" (วันปิดเร็ว)":""}`;
+  return ms>=s.open?`เปิดอยู่ ${hrs} · ปิดอีก ${durTh((s.close-ms)/6e4)}`:`ปิดอยู่ · เปิด ${bkkDayFmt.format(new Date(s.open))} ${hrs} (อีก ${durTh((s.open-ms)/6e4)})`}
+function fxReopenTxt(ms){ms=ms||Date.now();const d=new Date(ms),back=(7-d.getUTCDay())%7,o=Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate()+back,22);return `เปิดจันทร์ 05:00 น. ไทย (อีก ${durTh((o-ms)/6e4)})`}
 function mktOpen(sym,ms){ms=ms||Date.now();const g=SYMS[sym].grp;if(g==="US")return usOpenAt(ms);if(g==="FX"){const d=new Date(ms),wd=d.getUTCDay(),h=d.getUTCHours();return !((wd===5&&h>=22)||wd===6||(wd===0&&h<22))}return true}
 function tradable(sym,who){const c=SYMS[sym];if(c.grp==="CR")return true;
   if(c.grp==="US"){
-    if(!usOpenAt(Date.now())){if(who)toast("ตลาดหุ้น US ปิด (เปิด 21:30–04:00 น. ไทยช่วงนี้ · จ.–ศ. ตามเวลานิวยอร์ก · หยุดวันหยุด NYSE) ยังเปิดไม้ใหม่ไม่ได้");return false}
+    if(!usOpenAt(Date.now())){if(who)toast("ตลาดหุ้น US "+usHoursTxt()+" · ยังเปิดไม้ใหม่ไม่ได้");return false}
     if(Date.now()-(M[sym].t||0)>5*60000){if(who)toast("ราคา "+c.name.split(" ")[0]+" ไม่ขยับเกิน 5 นาที (ราคาค้าง) ยังเปิดไม้ไม่ได้");return false}
     if(who!=="you"&&usMinsToClose(Date.now())<=20)return false;   /* bot: no new stock entries in the last 20 min (it flattens 5 min before the close) */
     return true}
@@ -553,6 +566,13 @@ function botStatus(k){const B=S.bot.brains[k];
   if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===k))return '<span class="pos">ถืออยู่</span>';
   if(S.bot.mode==="off")return '<span style="color:var(--dim)">บอทปิดอยู่</span>';
   if(S.bot.halted)return '<span class="neg" title="'+esc(S.bot.halted)+'">⛔ Guardian หยุดวันนี้</span>';
+  /* v0.8.3: say when the market itself is the reason (closed / last minutes) and when the cloud swarm, not this brain, picks crypto trades */
+  const g=SYMS[k].grp,now=Date.now();
+  if(g==="CR"&&cbActive())return '<span title="Crypto เข้าไม้ตามการโหวตของฝูงบอท 100 ตัวบน cloud (แผง ☁️ ด้านบน) · สมองในเครื่องของเหรียญนี้เทรดเงาเรียนรู้อย่างเดียว">☁️ ฝูงบอท cloud เลือกไม้</span>';
+  if(g==="US"){const s=usNextSession(now);if(!usOpenAt(now))return `<span style="color:var(--dim)" title="ตลาดหุ้น US ${esc(usHoursTxt(now))} · บอทเปิดไม้หุ้นเฉพาะเวลาตลาดเปิด และไม่ถือข้ามคืน">🌙 ตลาดปิด${s?" · เปิดอีก "+durTh((s.open-now)/6e4):""}</span>`;
+    if(usMinsToClose(now)<=20)return '<span style="color:var(--dim)" title="บอทไม่เปิดไม้หุ้นใหม่ 20 นาทีสุดท้าย และปิดไม้หุ้นของบอท 5 นาทีก่อนตลาดปิด">⏳ ใกล้ปิด: ไม่เปิดไม้ใหม่</span>'}
+  if(g==="FX"){if(!fxOpenNow())return `<span style="color:var(--dim)" title="ตลาด Forex/ทองคำปิดเสาร์ 05:00 – จันทร์ 05:00 น. ไทย">🌙 ตลาดปิด · ${esc(fxReopenTxt(now))}</span>`;
+    if(fxNearClose())return '<span style="color:var(--dim)" title="บอทงดเปิดไม้ Forex 30 นาทีก่อนตลาดปิดสุดสัปดาห์ (กันราคากระโดดวันจันทร์)">⏳ ใกล้ปิดสุดสัปดาห์</span>'}
   if(!B||!B.length)return '<span style="color:var(--dim)">รอข้อมูล</span>';
   const maxW=Math.max(...B.map(a=>a.w)),ok=B.filter(a=>pickable(a,maxW));
   if(ok.length)return `<span title="บอทจะเข้าไม้เมื่อกลยุทธ์เหล่านี้ให้สัญญาณ">✅ รอสัญญาณ: ${ok.map(a=>FAM[a.fam].label.split(" ")[0]).join(", ")}</span>`;
@@ -616,7 +636,7 @@ function renderQuote(){const c=SYMS[curSym],m=M[curSym];$("symName").textContent
   $("spr").textContent=m.last!=null?(c.grp==="US"?"$"+spreadAbs(curSym).toFixed(3):(spreadAbs(curSym)/c.pip).toFixed(1)+" pip"):"—";
   $("lastTick").textContent=m.t?new Date(m.t).toLocaleTimeString("th-TH"):"—";
   if(m.first!=null&&m.last!=null){const d=(m.last-m.first)/m.first*100;$("chg").textContent=(d>=0?"+":"")+d.toFixed(3)+"% (ตั้งแต่เปิดแอป/ข้อมูลย้อนหลัง)";$("chg").className="num chg "+(d>=0?"up":"down")}
-  else{$("chg").textContent=c.grp==="US"&&!usOpenAt(Date.now())?"ตลาดหุ้น US ปิด · เปิด 21:30–04:00 น. ไทย":"";$("chg").className="num chg"}
+  else{$("chg").textContent=c.grp==="US"&&!usOpenAt(Date.now())?"ตลาดหุ้น US "+usHoursTxt():"";$("chg").className="num chg"}
   {const u=c.grp==="US"?"(เซนต์)":"(pip)";$("slLbl").textContent="SL "+u;$("tpLbl").textContent="TP "+u}
   $("lotUnit").textContent=c.grp==="CR"?"("+c.name.split("/")[0]+")":c.grp==="US"?"(หุ้น)":"(lot)";
   const sl=+$("sl").value,size=+$("lot").value; if(m.last){const r=(sl*c.pip+costPx(curSym))*units(curSym,size)*usdPerQuote(curSym,m.last);$("riskHint").textContent=`ถ้าโดน SL (รวมสเปรด+ค่าธรรมเนียม) จะเสียประมาณ ${money(r)} USD (${(r/equity()*100).toFixed(2)}% ของ equity)`}}
@@ -643,7 +663,7 @@ function brainSummary(){const rows=Object.keys(SYMS).map(k=>{const B=S.bot.brain
     const n=B.reduce((x,a)=>x+a.trades,0),best=[...B].sort((x,y)=>y.w-x.w)[0],open=S.acct.positions.filter(p=>p.by==="bot"&&p.sym===k).length,real=S.acct.history.filter(t=>t.by==="bot"&&t.sym===k);
     const rn=real.reduce((x,t)=>x+t.net,0);return `<tr${k===curSym?' style="background:#1d2638"':""}><td>${botTrades(k)?"🤖 ":""}${SYMS[k].name}</td><td class="num">${n}</td><td>${FAM[best.fam].label} <span class="num">${exp(best).toFixed(2)}R</span></td><td class="num">${real.length} ไม้ · ${money(rn,true)}$</td><td class="num">${costRtxt(k,best)}</td><td>${botStatus(k)}</td></tr>`}).join("");
   return `<table><tr><th>คู่</th><th>ไม้เงาที่ฝึก</th><th>กลยุทธ์นำ</th><th>ไม้จริงของบอท</th><th title="สเปรด+ค่าธรรมเนียมไปกลับ เทียบกับระยะ SL ของกลยุทธ์นำ">ต้นทุน/ไม้</th><th>สถานะบอท</th></tr>${rows}</table>
-  <p class="note">ต้นทุน/ไม้ = สเปรด + ค่าธรรมเนียมไปกลับ เทียบกับระยะ SL (1R) · ถ้าเกิน ~0.5R กลยุทธ์ต้องแม่นมากถึงจะกำไร บอทจะเรียนรู้เองและหยุดเข้าไม้ในคู่ที่ต้นทุนกินกำไรหมด (Crypto บนกราฟ 1–5 นาที ค่าธรรมเนียม 0.1%/ข้าง มักกิน 1–4R)<br>สถานะบอท: ✅ รอสัญญาณ = มีแชมป์ที่ผ่านเกณฑ์ (ฝึก &lt;8 ไม้ หรือคาดหวัง &gt; −0.05R และน้ำหนัก ≥ 60% ของตัวนำ) · ⏸ พัก = ไม่มีแชมป์ตัวไหนผ่าน บอทจึงไม่เข้าไม้คู่นี้ (ชี้เมาส์ดูเหตุผล) ซึ่งเป็นการป้องกันเงิน ไม่ใช่บอทพัง</p>`}
+  <p class="note">ต้นทุน/ไม้ = สเปรด + ค่าธรรมเนียมไปกลับ เทียบกับระยะ SL (1R) · ถ้าเกิน ~0.5R กลยุทธ์ต้องแม่นมากถึงจะกำไร บอทจะเรียนรู้เองและหยุดเข้าไม้ในคู่ที่ต้นทุนกินกำไรหมด (Crypto บนกราฟ 1–5 นาที ค่าธรรมเนียม 0.1%/ข้าง มักกิน 1–4R)<br>สถานะบอท: ✅ รอสัญญาณ = มีแชมป์ที่ผ่านเกณฑ์ (ฝึก &lt;8 ไม้ หรือคาดหวัง &gt; −0.05R และน้ำหนัก ≥ 60% ของตัวนำ) · ⏸ พัก = ไม่มีแชมป์ตัวไหนผ่าน บอทจึงไม่เข้าไม้คู่นี้ (ชี้เมาส์ดูเหตุผล) ซึ่งเป็นการป้องกันเงิน ไม่ใช่บอทพัง · 🌙 ตลาดปิด = รอตลาดเปิด (บอกเวลาที่เหลือ) · ☁️ = Crypto เข้าไม้ตามฝูงบอท cloud</p>`}
 function costRtxt(k,ag){const b=M[k].bars[+S.settings.botTf]||[];const A=b.length>20?atr(b.slice(-60),14):null;if(!A||!ag)return"—";const r=costPx(k)/(A*ag.sl);return `<span class="${r>0.5?"neg":""}">${r.toFixed(2)}R</span>`}
 function renderBrain(){
   const A=agents(curSym),maxW=Math.max(...A.map(a=>a.w));
@@ -778,7 +798,7 @@ setTimeout(()=>{if(window.__selftest)return;const any=Object.values(M).some(m=>m
 S.cloud=S.cloud||{on:true,brain:null,lastBar:{},loadedAt:0};
 const CB_TFS=[15,60,240], CB_IV={15:"15m",60:"1h",240:"4h"};
 const CB_TAG={against4h:"สวนเทรนด์ 4 ชม.",newswin:"ช่วงข่าวแรง",newsagainst:"สวนทางข่าว",volspike:"ผันผวนสูงผิดปกติ",highcost:"ต้นทุนสูงเมื่อเทียบกับ SL",weakvote:"เสียงโหวตก้ำกึ่ง"};
-const CB_FAM={ema:"EMA cross",rsi:"RSI reversion",don:"Donchian breakout",bb:"Bollinger reversion",trend:"EMA trend re-entry",mom:"Momentum burst",squeeze:"Volatility squeeze",pull:"Trend pullback"};
+const CB_FAM={ema:"EMA cross",rsi:"RSI reversion",don:"Donchian breakout",bb:"Bollinger reversion",trend:"EMA trend re-entry",mom:"Momentum burst",squeeze:"Volatility squeeze",pull:"Trend pullback",macd:"MACD cross",stoch:"Stochastic reversion",kelt:"Keltner breakout",supert:"Supertrend flip"};
 function cbApply(b,src){if(b&&b.agents&&(!S.cloud.brain||b.updated>S.cloud.brain.updated||(b.updated===S.cloud.brain.updated&&!S.cloud.loadedAt))){S.cloud.brain=b;S.cloud.loadedAt=Date.now();S.cloud.src=src;save();learn(`☁️ โหลดสมองจาก cloud: รุ่น ${b.gen} · บอทโหวตได้ ${b.agents.length} ตัว · กฎที่เรียนจากความผิดพลาด ${b.rules.length?b.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี"}`);try{renderBrain()}catch(e){}}}
 /* v0.7.1: on the website, read the brain straight from the public brain sheet (updated by the cloud swarm itself) — no file push needed.
    file:// can't read it (no CORS for local files), so the Mac keeps using brain.js from the sync task. Both paths: the newer brain wins. */
@@ -809,6 +829,18 @@ function cbSig(fam,b,p){ /* signal on the LAST closed bar only */
     const q=hist[Math.floor(hist.length*p.q)],[mp,sdp]=cbMsd(c,i-1,N),wPrev=mp?4*sdp/mp:null;if(wPrev!=null&&wPrev<=q){const [m,sd]=cbMsd(c,i,N);if(c[i]>m+2*sd)return 1;if(c[i]<m-2*sd)return -1}return 0}
   if(fam==="pull"){const N=p.n;if(i<N+6)return 0;const e=cbEma(c,N),r=cbRsi(c,5),lo=p.r,hi=100-p.r;if(r[i-1]==null)return 0;const up=c[i]>e[i]&&e[i]>e[i-5],dn=c[i]<e[i]&&e[i]<e[i-5];
     if(up&&r[i-1]<lo&&lo<=r[i])return 1;if(dn&&r[i-1]>hi&&hi>=r[i])return -1;return 0}
+  /* v0.8.3: 4 new families from engine cloud-2.3 — same math as sig_series (checked bar-by-bar against the Python engine) */
+  if(fam==="macd"){const F=p.f,Sl=p.s,G=p.g;if(i<Sl+G+2)return 0;const ef=cbEma(c,F),es=cbEma(c,Sl),m=c.map((_,j)=>ef[j]-es[j]),sg=cbEma(m,G);
+    if(m[i-1]<=sg[i-1]&&m[i]>sg[i])return 1;if(m[i-1]>=sg[i-1]&&m[i]<sg[i])return -1;return 0}
+  if(fam==="stoch"){const N=p.n,lo=p.lo,hi=100-lo;if(i<N+3)return 0;
+    const kAt=j=>{let hh=-Infinity,ll=Infinity;for(let q=j-N+1;q<=j;q++){hh=Math.max(hh,b[q][2]);ll=Math.min(ll,b[q][3])}return hh===ll?50:100*(c[j]-ll)/(hh-ll)};
+    const ksAt=j=>(kAt(j)+kAt(j-1)+kAt(j-2))/3,k0=ksAt(i),k1=ksAt(i-1);if(k1<lo&&lo<=k0)return 1;if(k1>hi&&hi>=k0)return -1;return 0}
+  if(fam==="kelt"){const N=p.n;if(i<N+2)return 0;const e=cbEma(c,N),at=cbAtr(b,N);
+    const up=e[i]+p.m*at[i],up1=e[i-1]+p.m*at[i-1],dn=e[i]-p.m*at[i],dn1=e[i-1]-p.m*at[i-1];if(c[i]>up&&c[i-1]<=up1)return 1;if(c[i]<dn&&c[i-1]>=dn1)return -1;return 0}
+  if(fam==="supert"){const N=p.n,at=cbAtr(b,N);let fu=null,fl=null,d=1,sig=0;
+    for(let j=1;j<n;j++){const hl=(b[j][2]+b[j][3])/2,bu=hl+p.m*at[j],bl=hl-p.m*at[j];if(fu===null){fu=bu;fl=bl;continue}
+      fu=(bu<fu||c[j-1]>fu)?bu:fu;fl=(bl>fl||c[j-1]<fl)?bl:fl;const nd=(d===-1&&c[j]>fu)?1:((d===1&&c[j]<fl)?-1:d);if(j===i)sig=(nd!==d&&j>=N+2)?nd:0;d=nd}
+    return sig}
   return 0}
 const cbExp=a=>a.n?a.sR/a.n:0, cbW=a=>Math.exp(2*(cbExp(a)-1/Math.sqrt(a.n+1))), cbElig=a=>a.n>=10&&cbExp(a)>0;
 async function cbFetch(sym,tf){const r=await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=${SYMS[sym].bn.toUpperCase()}&interval=${CB_IV[tf]}&limit=300`);const k=await r.json();
@@ -871,8 +903,13 @@ function cloudPanel(){const B=S.cloud.brain;
   const t=new Date(B.updated*1000).toLocaleString("th-TH"),top=[...B.agents].sort((x,y)=>cbW(y)-cbW(x)).slice(0,8);
   return `<div style="border:1px solid var(--line);padding:10px;border-radius:6px;margin-bottom:12px"><b>☁️ สมองจากฝูงบอท 100 ตัวบน cloud</b> · รุ่น ${B.gen} · อัปเดต ${t} · บอทที่โหวตได้ ${B.agents.length}/100
    <button class="btn" id="cbToggle" style="margin-left:8px">${S.cloud.on?"✅ ใช้อยู่ (กดเพื่อปิด)":"⏸ ปิดอยู่ (กดเพื่อใช้)"}</button>
-   <div class="note" style="margin:6px 0">BTC/ETH/SOL: บอทเหล่านี้โหวตเข้าไม้บนกราฟ 15m/1h/4h · ขนาดไม้ = 1% × ความแรงโหวต (ไม่เกิน Kelly/4) · ความเสี่ยงรวม Crypto ≤ ${((B.maxOpenRisk||0.02)*100).toFixed(0)}% · Forex ยังใช้บอทเดิม · กฎที่เรียนจากความผิดพลาด: ${(B.rules||[]).length?B.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี"}</div>
-   <table><tr><th>บอท</th><th>กลยุทธ์</th><th>TF</th><th>ไม้ที่ฝึก</th><th>เฉลี่ย R</th><th>ชนะ %</th></tr>${top.map(a=>`<tr><td>${a.id}</td><td>${CB_FAM[a.fam]||a.fam}</td><td>${a.tf}m</td><td class="num">${a.n}</td><td class="num">${cbExp(a).toFixed(2)}</td><td class="num">${a.n?(100*a.wins/a.n).toFixed(0):0}</td></tr>`).join("")}</table></div>`}
+   <div class="note" style="margin:6px 0">Crypto 9 เหรียญ: บอทเหล่านี้โหวตเข้าไม้บนกราฟ 15m/1h/4h · ขนาดไม้ = 1% × ความแรงโหวต (ไม่เกิน Kelly/4) · ความเสี่ยงรวม Crypto ≤ ${((B.maxOpenRisk||0.02)*100).toFixed(0)}% · Forex ยังใช้บอทเดิม · กฎที่เรียนจากความผิดพลาด: ${(B.rules||[]).length?B.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี"}</div>
+   <table><tr><th>บอท</th><th>กลยุทธ์</th><th>TF</th><th>ไม้ที่ฝึก</th><th>เฉลี่ย R</th><th>ชนะ %</th></tr>${top.map(a=>`<tr><td>${a.id}</td><td>${CB_FAM[a.fam]||a.fam}</td><td>${a.tf}m</td><td class="num">${a.n}</td><td class="num">${cbExp(a).toFixed(2)}</td><td class="num">${a.n?(100*a.wins/a.n).toFixed(0):0}</td></tr>`).join("")}</table>${cbLibrary(B)}</div>`}
+/* v0.8.3 (Thanat): formula library kept in the brain + a scoreboard of every strategy family the swarm is testing */
+function cbLibrary(B){const lib=B.library||[],F=B.fams||{};const fams=Object.entries(F).sort((x,y)=>(y[1].voters-x[1].voters)||(y[1].best-x[1].best));
+  return `<div style="margin-top:10px"><b>📚 คลังสูตรของบอท</b>${lib.length?`<ul style="margin:4px 0 6px 18px">${lib.map(l=>`<li><b>${esc(l.name)}</b>${l.from?` <span style="color:var(--dim)">(จาก${esc(l.from)})</span>`:""}<br><span style="color:var(--dim)">${esc(l.use||"")}</span></li>`).join("")}</ul>`:`<div class="note">ยังไม่มีในสมองรุ่นนี้ (มากับรอบถัดไปของฝูงบอท)</div>`}
+   <div class="note" style="margin:2px 0 6px">สูตรในคลังเป็นเครื่องมือ ไม่ใช่คำสั่ง: ฝูงบอทยังลองสูตรอื่นทุกรอบ (กลายพันธุ์พารามิเตอร์ + สุ่มสำรวจตระกูลใหม่) แล้วให้สิทธิ์โหวตเฉพาะตัวที่ยังกำไรหลังหักต้นทุน</div>
+   ${fams.length?`<table><tr><th>ตระกูลกลยุทธ์</th><th>บอท</th><th>โหวตได้</th><th>ไม้ที่ฝึก</th><th>ตัวที่ดีสุด R/ไม้</th><th>เฉลี่ยทั้งตระกูล</th></tr>${fams.map(([k,v])=>`<tr><td>${esc(v.label||CB_FAM[k]||k)}${(lib.find(l=>(l.fams||[]).includes(k)))?" 📚":""}</td><td class="num">${v.bots}</td><td class="num">${v.voters}</td><td class="num">${v.trades}</td><td class="num ${cls(v.best)}">${(+v.best).toFixed(2)}</td><td class="num ${cls(v.avg)}">${(+v.avg).toFixed(2)}</td></tr>`).join("")}</table>`:""}</div>`}
 document.addEventListener("click",e=>{if(e.target&&e.target.id==="cbToggle"){S.cloud.on=!S.cloud.on;save();learn(S.cloud.on?"☁️ เปิดใช้สมองจาก cloud สำหรับ Crypto":"☁️ ปิดสมองจาก cloud (Crypto กลับไปใช้บอทเดิม)");renderBrain()}});
 
 /* ===================== v0.6.2: forex candles survive reloads + history backfill ===================== */
@@ -957,6 +994,7 @@ if(!S.acct.dayDate&&!S.acct.history.length&&!S.acct.positions.length){S.acct.bal
 initChart(); renderSyms(); renderTfs(); renderAll(); redrawChart(); requestAnimationFrame(frame);
 if(new URLSearchParams(location.search).has("selftest")) window.__selftest=true; else { if(inSandbox()) netBlocked("sandbox"); loadBars(); connectFx(); connectCrypto(); for(const s in SYMS) if(SYMS[s].bn) backfillCrypto(s); setTimeout(()=>backfillFxAll(false),1500); setInterval(()=>tdSync(false),15*60*1000); setInterval(saveBars,30000); window.addEventListener("beforeunload",saveBars); setTimeout(()=>{try{redrawChart()}catch(e){}},500); }
 setInterval(renderBanner,3000);
+{const usHelp=()=>{try{const e=$("usHrsHelp");if(e)e.textContent="ตอนนี้: "+usHoursTxt()}catch(x){}};usHelp();setInterval(()=>{usHelp();try{if($("t-brain").classList.contains("on"))renderBrain()}catch(x){}},60000)} /* v0.8.3 */
 setInterval(()=>{try{const el=document.getElementById("fxState");if(el&&!fxOpenNow()&&!/ตลาดปิด/.test(el.textContent))el.textContent+=" · ตลาดปิด"}catch(e){}},5000); /* v0.6.9 */
 if(!window.__selftest){cbLoadScript();setInterval(cbLoadScript,15*60*1000);setTimeout(cloudTick,8000);setInterval(cloudTick,60*1000);}
 if(S.bot.migr52!=null&&!S.bot.migr52logged){S.bot.migr52logged=1;learn(`อัปเดต v0.5.2: ไม้เงาเดิมไม่ได้หักค่าธรรมเนียม 0.1%/ข้าง สถิติเก่า ${S.bot.migr52} กลยุทธ์ถูกเก็บไว้ดูย้อนหลัง พารามิเตอร์/แชมป์เดิมยังอยู่ เริ่มวัดผลใหม่หลังหักต้นทุนจริง · ขนาดไม้คิดความเสี่ยง 1% รวมสเปรด+ค่าธรรมเนียม`)}
@@ -965,7 +1003,7 @@ if(!S.bot.v81td){S.bot.v81td=1;try{const t=tdState();if(t.used>=t.cap){t.used=Ma
 if(S.bot.v80tf===1){S.bot.v80tf=2;learn("อัปเดต v0.8.0: เปลี่ยน Timeframe ที่บอท Forex/หุ้นใช้จาก 1 นาที → 15 นาที เพราะแท่ง 1 นาทีทำให้ SL แคบกว่าต้นทุน (สเปรด+ค่าธรรมเนียม) บอทเลยต้องข้ามแทบทุกไม้ · เปลี่ยนกลับได้ในตั้งค่า")}
 if(!S.bot.v80log){S.bot.v80log=1;learn("อัปเดต v0.8.0: เพิ่ม Crypto 6 เหรียญ (BNB XRP DOGE ADA AVAX LINK · ใช้สมองฝูงบอท cloud) + ตลาดใหม่หุ้น US 5 ตัว (SPY QQQ NVDA AAPL TSLA · ตามเวลาตลาดนิวยอร์ก ซื้อได้อย่างเดียว ไม่ถือข้ามคืน) · บอทถือพร้อมกันได้ 8 ไม้ ความเสี่ยงรวม ≤5%")}
 renderAlert();
-window.QV={onTick,S,M,agents,costPx,shadowR,openPos,closePos,taxSummary,pit,guardian,lossAlert,checkLossAlerts,readiness,chargeSwaps,cbDecide,cbAct,cbSig,cloudTick,tradable,usOpenAt,usMinsToClose,usSession,lastOpenSym,flattenUs,botOpenRisk,botAct,botRoom,usPriority,nonUsRiskRoom,marginUsd,TD_SYMS,tdSync,cbApply};
+window.QV={onTick,S,M,agents,costPx,shadowR,openPos,closePos,taxSummary,pit,guardian,lossAlert,checkLossAlerts,readiness,chargeSwaps,cbDecide,cbAct,cbSig,cloudTick,tradable,usOpenAt,usMinsToClose,usSession,usNextSession,usHoursTxt,fxReopenTxt,botStatus,lastOpenSym,flattenUs,botOpenRisk,botAct,botRoom,usPriority,nonUsRiskRoom,marginUsd,TD_SYMS,tdSync,cbApply};
 </script>
 </body>
 </html>
