@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.8.1 · 2026-11-17";
+const VERSION="v0.8.2 · 2026-11-17";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -457,6 +457,17 @@ if(!S.bot.v52){let n=0;for(const k in S.bot.brains){for(const a of S.bot.brains[
   S.bot.v52=1;S.bot.migr52=n;} /* v0.5.2: old shadow stats ignored fees → archived in a.legacy, params/champions kept, re-learn after costs */
 const BOT_MAX_TOTAL=8; /* v0.8.0: max bot positions open at once across all 20 symbols (1 per symbol; was 5 for 9 symbols) */
 const BOT_MAX_RISK=5;  /* v0.8.0: …and their combined worst-case loss at SL must stay ≤ 5% of equity (same ceiling as the old 5 × 1%) */
+/* v0.8.2 (Thanat): while the US stock market is open, stocks get first call on the bot's room; crypto/forex keep trading in what is left */
+const US_RES_SLOTS=3, US_RES_RISK=2;   /* slots / % of equity kept free for US stocks during the session (until the bot's last-20-min cutoff) */
+function usPriority(){const m=usMinsToClose(Date.now());return m!=null&&m>20}
+function botRoom(sym,newRisk){const bp=S.acct.positions.filter(p=>p.by==="bot"),open=botOpenRisk();
+  if(bp.length>=BOT_MAX_TOTAL||open+newRisk>BOT_MAX_RISK+1e-9)return false;
+  if(SYMS[sym].grp==="US"||!usPriority())return true;
+  const e=equity()||1,us=bp.filter(p=>SYMS[p.sym].grp==="US"),usRisk=us.reduce((x,p)=>x+(p.risk>0?p.risk/e*100:+S.settings.risk),0);
+  const freeSlotsAfter=BOT_MAX_TOTAL-bp.length-1,freeRiskAfter=BOT_MAX_RISK-open-newRisk;
+  return freeSlotsAfter>=Math.max(0,US_RES_SLOTS-us.length)&&freeRiskAfter+1e-9>=Math.max(0,US_RES_RISK-usRisk)}
+function nonUsRiskRoom(){if(!usPriority())return BOT_MAX_RISK-botOpenRisk();const e=equity()||1,usRisk=S.acct.positions.filter(p=>p.by==="bot"&&SYMS[p.sym].grp==="US").reduce((x,p)=>x+(p.risk>0?p.risk/e*100:+S.settings.risk),0);
+  return BOT_MAX_RISK-botOpenRisk()-Math.max(0,US_RES_RISK-usRisk)}
 function botOpenRisk(){const e=equity()||1;return S.acct.positions.filter(p=>p.by==="bot").reduce((x,p)=>x+(p.risk>0?p.risk/e*100:(p.meta&&p.meta.riskPct)||+S.settings.risk),0)}
 function botTrades(sym){return S.settings.botSym==="ALL"||S.settings.botSym===sym}
 function botSymsLabel(){return S.settings.botSym==="ALL"?"ทุกคู่ ("+Object.keys(SYMS).length+" ตัว)":SYMS[S.settings.botSym].name}
@@ -559,7 +570,7 @@ function botAct(sym,fired,A){
   if(S.bot.mode==="signal"){toast(`📣 สัญญาณ ${dirTxt} ${SYMS[sym].name} จาก ${name} (น้ำหนัก ${pick.ag.w.toFixed(2)})`);notify(`สัญญาณ ${dirTxt} ${SYMS[sym].name}`,name);return}
   const g=guardian(); renderGuard(g); if(!g.ok) return;
   if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===sym)) return; /* one bot position per symbol */
-  if(botOpenRisk()+(+S.settings.risk)>BOT_MAX_RISK) return; /* v0.8.0 */
+  if(!botRoom(sym,+S.settings.risk)) return; /* v0.8.0 caps + v0.8.2 US-session priority */
   const c=SYMS[sym], slDist=A*pick.ag.sl, tpDist=A*pick.ag.tp;
   /* v0.7.0 safety: an SL thinner than the costs can't be won and is jumped over by the next sparse tick (USD/THB −8.8R, −5.4R) */
   const costR=costPx(sym)/slDist;
@@ -663,7 +674,7 @@ function renderBotX(){}
 function renderBot(){renderBanner();const bs=$("botSym");if(!bs.options.length)bs.innerHTML=`<option value="ALL">ทุกคู่ (ALL)</option>`+Object.keys(SYMS).map(k=>`<option value="${k}">${SYMS[k].name}</option>`).join("");bs.value=S.settings.botSym;document.querySelectorAll("#modes button").forEach(b=>b.classList.toggle("on",b.dataset.m===S.bot.mode));
   $("botNote").textContent={off:"บอทปิดอยู่ แต่สมองยังเทรดเงาและเรียนรู้ต่อ",signal:"บอทจะเด้งแจ้งเตือนเมื่อมีสัญญาณ คุณกดเข้าออเดอร์เอง",auto:`บอทเทรด ${botSymsLabel()} เองอัตโนมัติ (เสี่ยง ${S.settings.risk}%/ไม้ · สูงสุด 1 ไม้/คู่ รวม ${BOT_MAX_TOTAL} ไม้) · คุณดูกราฟคู่ไหนก็ได้ และกด BUY/SELL เองได้ทุกเมื่อ`}[S.bot.mode];renderGuard()}
 function renderBanner(){const m=S.bot.mode,b=$("botBanner");const all=S.settings.botSym==="ALL";const liveN=Object.keys(SYMS).filter(k=>botTrades(k)&&M[k].last!=null).length;const c={name:botSymsLabel()},live=all?liveN>0:M[S.settings.botSym].last!=null;
-  b.innerHTML=m==="auto"?`🤖 <b>บอทกำลังเทรดอัตโนมัติ</b> บน ${c.name} ${all?`(มีราคาสด ${liveN} คู่)`:live?"":"(รอราคาสด…)"} · คุณแค่ดู หรือกด BUY/SELL เข้าเองบางไม้ได้ ไม้ของคุณกับของบอทแยกกันชัดเจนในตาราง`:m==="signal"?"📣 บอทอยู่โหมดแจ้งสัญญาณ: จะเด้งเตือน แต่ไม่เข้าออเดอร์เอง":"⏸ บอทปิดอยู่ (สมองยังเรียนรู้ต่อ) · กดโหมด “เทรดเองอัตโนมัติ” เพื่อให้บอทเทรด";}
+  b.innerHTML=m==="auto"?`🤖 <b>บอทกำลังเทรดอัตโนมัติ</b> บน ${c.name} ${all?`(มีราคาสด ${liveN} คู่)`:live?"":"(รอราคาสด…)"} ${usPriority()?` · 📈 <b>ตลาดหุ้น US เปิด</b>: ให้สิทธิ์หุ้นก่อน (กันไว้ ${US_RES_SLOTS} ไม้ / เสี่ยง ${US_RES_RISK}%) Crypto/Forex ยังเทรดต่อในส่วนที่เหลือ`:""} · คุณแค่ดู หรือกด BUY/SELL เข้าเองบางไม้ได้ ไม้ของคุณกับของบอทแยกกันชัดเจนในตาราง`:m==="signal"?"📣 บอทอยู่โหมดแจ้งสัญญาณ: จะเด้งเตือน แต่ไม่เข้าออเดอร์เอง":"⏸ บอทปิดอยู่ (สมองยังเรียนรู้ต่อ) · กดโหมด “เทรดเองอัตโนมัติ” เพื่อให้บอทเทรด";}
 /* ===================== go-live readiness (v0.5) ===================== */
 function readiness(trades){
   const T=trades.slice().sort((a,b)=>a.close-b.close), n=T.length, start=+S.settings.start||10000;
@@ -746,7 +757,9 @@ $("saveSettings").onclick=()=>{const s=S.settings,oldKey=s.key,oldTd=s.tdKey||""
 setInterval(()=>{$("clock").textContent=new Date().toLocaleTimeString("th-TH")+" BKK"},250);
 setInterval(()=>{for(const s in M) if(M[s].last!=null) checkStops(s);checkLossAlerts();chargeSwaps();flattenUs()},1000);
 /* v0.8.0: the bot never holds US stocks overnight (gap risk): its stock positions are closed 5 min before the close */
-function flattenUs(){const now=Date.now(),left=usMinsToClose(now);if(left==null)return;const today=nyParts(now).day;
+let usPrioWas=null;
+function usPrioLog(){const now=usPriority();if(usPrioWas!==null&&now!==usPrioWas)learn(now?`📈 ตลาดหุ้น US เปิด: บอทให้สิทธิ์หุ้นก่อน (กันไว้ ${US_RES_SLOTS} ไม้ / เสี่ยง ${US_RES_RISK}% ของ equity) · Crypto/Forex ยังเทรดต่อในส่วนที่เหลือ`:"📉 หมดช่วงให้สิทธิ์หุ้น US (20 นาทีก่อนปิด): Crypto/Forex ใช้เพดานเต็มได้ตามเดิม");usPrioWas=now}
+function flattenUs(){usPrioLog();const now=Date.now(),left=usMinsToClose(now);if(left==null)return;const today=nyParts(now).day;
   for(const p of S.acct.positions.filter(p=>p.by==="bot"&&SYMS[p.sym]&&SYMS[p.sym].grp==="US")){
     if(M[p.sym].last==null)continue;
     if(left<=5)closePos(p.id,"ก่อนตลาดปิด");
@@ -838,7 +851,8 @@ function cbAct(sym,tf,r){
   const g=guardian();renderGuard(g);if(!g.ok)return;
   if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===sym))return;
   const openRisk=S.acct.positions.filter(p=>p.by==="bot"&&SYMS[p.sym].grp==="CR").reduce((x,p)=>x+((p.meta&&p.meta.riskPct)||1)/100,0);
-  const risk=Math.min(r.riskPct,(S.cloud.brain.maxOpenRisk||0.02)-openRisk,(BOT_MAX_RISK-botOpenRisk())/100); /* v0.8.0: also inside the 5% all-bot ceiling */if(risk<0.0025)return;
+  const risk=Math.min(r.riskPct,(S.cloud.brain.maxOpenRisk||0.02)-openRisk,nonUsRiskRoom()/100); /* v0.8.0: inside the 5% all-bot ceiling · v0.8.2: minus the room kept for US stocks during their session */if(risk<0.0025)return;
+  if(!botRoom(sym,risk*100))return;
   const riskUsd=equity()*risk,perUnit=(r.slD+costPx(sym))*usdPerQuote(sym,M[sym].last);let size=riskUsd/perUnit/c.lot;if(!(size>0))return;
   const m1=marginUsd({sym,size:1,entry:M[sym].last}),freeM=equity()-usedMargin();if(m1>0)size=Math.min(size,0.25*freeM/m1);if(size<(c.step||0.01))return;
   const fams=[...new Set(r.side.map(a=>CB_FAM[a.fam]||a.fam))].join("+");
@@ -951,7 +965,7 @@ if(!S.bot.v81td){S.bot.v81td=1;try{const t=tdState();if(t.used>=t.cap){t.used=Ma
 if(S.bot.v80tf===1){S.bot.v80tf=2;learn("อัปเดต v0.8.0: เปลี่ยน Timeframe ที่บอท Forex/หุ้นใช้จาก 1 นาที → 15 นาที เพราะแท่ง 1 นาทีทำให้ SL แคบกว่าต้นทุน (สเปรด+ค่าธรรมเนียม) บอทเลยต้องข้ามแทบทุกไม้ · เปลี่ยนกลับได้ในตั้งค่า")}
 if(!S.bot.v80log){S.bot.v80log=1;learn("อัปเดต v0.8.0: เพิ่ม Crypto 6 เหรียญ (BNB XRP DOGE ADA AVAX LINK · ใช้สมองฝูงบอท cloud) + ตลาดใหม่หุ้น US 5 ตัว (SPY QQQ NVDA AAPL TSLA · ตามเวลาตลาดนิวยอร์ก ซื้อได้อย่างเดียว ไม่ถือข้ามคืน) · บอทถือพร้อมกันได้ 8 ไม้ ความเสี่ยงรวม ≤5%")}
 renderAlert();
-window.QV={onTick,S,M,agents,costPx,shadowR,openPos,closePos,taxSummary,pit,guardian,lossAlert,checkLossAlerts,readiness,chargeSwaps,cbDecide,cbAct,cbSig,cloudTick,tradable,usOpenAt,usMinsToClose,usSession,lastOpenSym,flattenUs,botOpenRisk,botAct,marginUsd,TD_SYMS,tdSync,cbApply};
+window.QV={onTick,S,M,agents,costPx,shadowR,openPos,closePos,taxSummary,pit,guardian,lossAlert,checkLossAlerts,readiness,chargeSwaps,cbDecide,cbAct,cbSig,cloudTick,tradable,usOpenAt,usMinsToClose,usSession,lastOpenSym,flattenUs,botOpenRisk,botAct,botRoom,usPriority,nonUsRiskRoom,marginUsd,TD_SYMS,tdSync,cbApply};
 </script>
 </body>
 </html>
