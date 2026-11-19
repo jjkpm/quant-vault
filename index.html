@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.9.2 · 2026-11-18";
+const VERSION="v0.9.3 · 2026-11-19";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -426,7 +426,9 @@ function closePos(id,reason){
 function checkStops(sym){
   if(SYMS[sym].grp!=="US"||usOpenAt(Date.now())) /* v0.8.0: stock SL/TP fill only in regular hours (extended-hours prints still move the chart/shadow bots) */
   for(const p of [...S.acct.positions]){ if(p.sym!==sym)continue; const [b,a]=bidAsk(sym); const px=p.dir>0?b:a;
-    if(p.sl!=null&&(p.dir>0?px<=p.sl:px>=p.sl)) closePos(p.id,"SL"); else if(p.tp!=null&&(p.dir>0?px>=p.tp:px<=p.tp)) closePos(p.id,"TP"); }
+    if(p.sl!=null&&(p.dir>0?px<=p.sl:px>=p.sl)) closePos(p.id,p.meta&&p.meta.beMoved?"SL@ทุน":"SL"); else if(p.tp!=null&&(p.dir>0?px>=p.tp:px<=p.tp)) closePos(p.id,"TP");
+    else if(p.meta&&p.meta.be&&!p.meta.beMoved&&p.meta.r1&&px!=null&&(p.dir>0?px>=p.entry+p.meta.r1:px<=p.entry-p.meta.r1)){ /* v0.9.3 runner: +1R → stop to +0.1R, let the rest run to TP */
+      p.sl=p.entry+p.dir*0.1*p.meta.r1;p.meta.beMoved=1;save();learn(`🛡️ ${SYMS[sym].name}: ได้ +1R แล้ว เลื่อน SL ไปที่ทุน+0.1R (${fmt(sym,p.sl)}) · ไม้นี้แพ้ไม่ได้แล้ว ปล่อยวิ่งไป TP ${fmt(sym,p.tp)}`)} }
   shadowTick(sym);
 }
 
@@ -734,6 +736,12 @@ function breakEven(){const start=+S.settings.start||10000,eq=equity(),gap=start-
   const mR=H.reduce((x,t)=>x+t.R,0)/H.length,big=H.filter(t=>Math.abs(t.R)>=0.3),riskUsd=big.length?big.reduce((x,t)=>x+Math.abs(t.net/t.R),0)/big.length:equity()*0.005;
   const span=Math.max(1,(H[H.length-1].close-H[0].open)/86400000),perDay=H.length/span,days=e=>e>0?gap/(e*riskUsd*perDay):null;
   return {gap,eq,start,n:H.length,mR,riskUsd,perDay,days:days(mR),scen:[0.05,0.1,0.2].map(e=>({e,days:days(e)}))}}
+/* v0.9.3 (Thanat: "we don't need to be right often, but must win more than we lose"): win rate vs payoff of the bot's own trades */
+function payoffBox(){const H=S.acct.history.filter(t=>t.by==="bot"&&!t.manual&&t.R!=null&&isFinite(t.R));if(H.length<3)return "";
+  const W=H.filter(t=>t.R>0),L=H.filter(t=>t.R<=0),aw=W.length?W.reduce((x,t)=>x+t.R,0)/W.length:0,al=L.length?L.reduce((x,t)=>x+t.R,0)/L.length:0;
+  const ratio=al<0?aw/-al:null,need=ratio?100/(1+ratio):null,wr=100*W.length/H.length;
+  return `<div style="border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:0 0 10px"><b>⚖️ ได้ vs เสีย</b> (${H.length} ไม้ของบอท): ชนะ <b>${wr.toFixed(0)}%</b> · ได้เฉลี่ย <b class="pos">+${aw.toFixed(2)}R</b> · เสียเฉลี่ย <b class="neg">${al.toFixed(2)}R</b>${ratio?` · ได้/เสีย <b>${ratio.toFixed(2)} เท่า</b> → ต้องชนะ ≥ <b>${need.toFixed(0)}%</b> ถึงคุ้มทุน ${wr>=need?"✅":"❌"}`:""}
+    <br><span class="note">หลักของธนัช: ไม่ต้องถูกบ่อย แต่ต้องได้มากกว่าตอนเสีย · ได้ 2 เท่าของที่เสีย ชนะแค่ 34% ก็คุ้ม · 3 เท่า ชนะ 25% · ตั้งแต่ v0.9.3 ฝูงบอทตั้ง TP ≥ 2×SL ทุกไม้ และบางกลยุทธ์ "ปล่อยกำไรวิ่ง" (ได้ +1R แล้วเลื่อน SL ไปที่ทุน)</span></div>`}
 function beBox(){const b=breakEven(),f=x=>x==null?"ไม่กลับ (ความได้เปรียบยังติดลบ)":x<1?"ภายใน 1 วัน":`~${x<10?x.toFixed(1):Math.round(x)} วัน`;
   if(b.done)return `<div style="border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:0 0 10px"><b>📅 คุ้มทุน</b>: บัญชีอยู่เหนือทุนเริ่ม ${money(b.start)} แล้ว (+${money(-b.gap)})</div>`;
   if(!b.mR&&b.mR!==0)return `<div style="border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:0 0 10px"><b>📅 คาดการณ์คุ้มทุน</b>: ขาดอีก ${money(b.gap)} · ไม้ของบอทยังน้อยเกินไป (${b.n} ไม้) ต้องมีอย่างน้อย 5 ไม้ก่อน</div>`;
@@ -745,7 +753,7 @@ function renderReady(){const el=$("t-ready");if(!el)return;const bot=S.acct.hist
   const verdict=pct>=gate?`✅ ความพร้อม ${pct}% ผ่านด่านเงินจริง ${gate}%: ไปขั้นถัดไปได้ (QV Bridge: ทดลองเงินจริงก้อนเล็กบน Binance TH / Bitkub)`:r.score>=4?`🟡 ความพร้อม ${pct}% (ต้อง ≥ ${gate}%): ใกล้แล้ว แต่ยังห้ามใช้เงินจริง`:`🔴 ความพร้อม ${pct}% (ต้อง ≥ ${gate}%): ยังอยู่ช่วงฝึก เก็บผลต่อไป`;
   const gateBox=`<div style="border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:0 0 10px"><b>🚪 ด่านเงินจริง ${gate}%</b> = ต้องผ่านครบทั้ง 6 ข้อ (5/6 = 83% ยังไม่ผ่าน) ทั้ง 3 ที่: <br>① บัญชีจำลองในแอปนี้: <b>${pct}%</b> · ② ฝูงบอทบน cloud: <b>${cr?cr.pct+"%":"ยังไม่มีข้อมูล"}</b>${cr&&cr.n?` (${cr.n} ไม้, ${cr.days} วัน, PF ${cr.pf})`:""} · ③ QV Bridge โหมดฝึก (ซื้อ-ขายแบบ spot ซื้อก่อนขายเท่านั้น คิดค่าธรรมเนียมจริงของกระดาน): ดูในหน้าต่าง Bridge<br><span class="note">QV Bridge จะไม่ยอมส่งคำสั่งเงินจริงจนกว่าจะผ่านครบ ② และ ③</span></div>`;
   const per=Object.keys(SYMS).map(k=>{const t=bot.filter(x=>x.sym===k);if(!t.length)return"";const x=readiness(t);return `<tr><td>${SYMS[k].name}</td><td class="num">${x.n}</td><td class="num">${x.mR.toFixed(2)}R</td><td class="num">${x.pf.toFixed(2)}</td><td class="num">${(x.mdd*100).toFixed(1)}%</td><td class="num">${x.score}/6</td></tr>`}).join("");
-  el.innerHTML=`<p style="font-size:15px;margin:4px 0 10px"><b>${verdict}</b></p>${gateBox}${beBox()}
+  el.innerHTML=`<p style="font-size:15px;margin:4px 0 10px"><b>${verdict}</b></p>${gateBox}${payoffBox()}${beBox()}
   <table><tr><th>เกณฑ์</th><th>ตอนนี้</th><th>เป้า</th><th style="width:28%">ความคืบหน้า</th><th></th></tr>${r.C.map(c=>`<tr><td>${c.k}<div class="note" style="margin:0">${c.why}</div></td><td class="num">${c.v}</td><td class="num">${c.goal}</td><td><div class="wbar"><i style="width:${(Math.max(0,c.prog)*100).toFixed(0)}%;${c.ok?"":"background:var(--amber)"}"></i></div></td><td>${c.ok?"✅":"⏳"}</td></tr>`).join("")}</table>
   ${per?`<h4 style="margin:14px 0 6px">แยกรายคู่ (ใช้ดูว่าคู่ไหนน่าไปต่อ)</h4><table><tr><th>คู่</th><th>ไม้</th><th>เฉลี่ย</th><th>PF</th><th>DD</th><th>ผ่าน</th></tr>${per}</table>`:""}
   <p class="note">คิดจากไม้จริงของบอทในบัญชีจำลอง หลังหักสเปรด ค่าธรรมเนียม slippage และค่า swap ค้างคืนแล้ว · ผ่านครบไม่ได้แปลว่าจะกำไรในเงินจริง แค่แปลว่ามีหลักฐานพอจะทดลองก้อนเล็ก · ไม่ใช่คำแนะนำการลงทุน</p>`}
@@ -904,7 +912,8 @@ function cbDecide(sym,tf,b,b4,B){
   let riskPct=Math.min((B.risk||0.01)*Math.min(1,Math.max(0.25,Math.abs(score))),0.25*kelly);
   const bo=B.boost,hi=bo&&Math.abs(score)>=bo.minScore&&kelly>=bo.minKelly;   /* v0.9.0: proven-confidence boost, unlocked by the swarm only when hi-confidence signals have proven better results */
   if(hi&&bo.on)riskPct=Math.min(bo.maxRisk||0.02,0.25*kelly);
-  return {d,score,slD,tpD,tags,kelly,riskPct,side,hi:!!hi,boosted:!!(hi&&bo.on)};
+  const wb=side.reduce((x,a)=>x+(a.be?cbW(a):0),0),wa=side.reduce((x,a)=>x+cbW(a),0);   /* v0.9.3: runner if the weighted majority of the side's voters use it (same as the engine) */
+  return {d,score,slD,tpD,tags,kelly,riskPct,side,hi:!!hi,boosted:!!(hi&&bo.on),be:wa>0&&wb*2>=wa};
 }
 async function cloudTick(){
   if(!cbActive()||window.__selftest)return;
@@ -935,7 +944,7 @@ function cbAct(sym,tf,r,B){
   const riskUsd=equity()*risk,perUnit=(r.slD+costPx(sym))*usdPerQuote(sym,M[sym].last);let size=riskUsd/perUnit/c.lot;if(!(size>0))return;
   const m1=marginUsd({sym,size:1,entry:M[sym].last}),freeM=equity()-usedMargin();if(m1>0)size=Math.min(size,0.25*freeM/m1);if(size<(c.step||0.01))return;
   const fams=[...new Set(r.side.map(a=>CB_FAM[a.fam]||a.fam))].join("+");
-  const pos=openPos(sym,r.d,size,r.slD/c.pip,r.tpD/c.pip,"bot",{strat:`${mk?"☁️📈":"☁️"} ${tf}m ${fams}`,cloud:mk?"mk":1,tf,riskPct:+(risk*100).toFixed(3),score:+r.score.toFixed(3),tags:r.tags,voters:who,kelly:+r.kelly.toFixed(3)});
+  const pos=openPos(sym,r.d,size,r.slD/c.pip,r.tpD/c.pip,"bot",{strat:`${mk?"☁️📈":"☁️"} ${tf}m ${fams}`,cloud:mk?"mk":1,tf,riskPct:+(risk*100).toFixed(3),score:+r.score.toFixed(3),tags:r.tags,voters:who,kelly:+r.kelly.toFixed(3),be:r.be?1:0,r1:r.slD});
   if(pos){const act=pos.risk>0?pos.risk/equity()*100:risk*100;pos.meta.riskPct=+act.toFixed(3);save();}
   if(pos)learn(`${mk?"☁️📈 ฝูงหุ้น/Forex":"☁️ ฝูงบอท"}เข้า ${dirTxt} ${c.name} ${tf}m · โหวต ${r.score.toFixed(2)} โดย ${who} · เสี่ยง ${pos.meta.riskPct.toFixed(2)}%${pos.meta.riskPct<risk*100-0.01?" (ถูกจำกัดด้วย margin 25%)":""} (Kelly/4 ${(r.kelly/4*100).toFixed(1)}%)${r.boosted?" · 🚀 ไม้มั่นใจสูง (เพิ่มเดิมพัน)":""}${r.tags.length?" · ⚠️ "+r.tags.map(t=>CB_TAG[t]).join(", "):""}`);
 }
@@ -953,7 +962,7 @@ function mkPanel(){const B=S.mk&&S.mk.brain;
   const fams=Object.entries(F).sort((x,y)=>(y[1].voters-x[1].voters)||(y[1].best-x[1].best));
   return `<div style="border:1px solid var(--line);padding:10px;border-radius:6px;margin-bottom:12px"><b>☁️📈 สมองฝูงบอทหุ้น US + Forex/ทอง (100 ตัว)</b> · รุ่น ${B.gen} · อัปเดต ${t} · โหวตได้ ${nv}/100 ${S.cloud.on?"":"· ⏸ ปิดอยู่ (สวิตช์เดียวกับฝูง Crypto)"}
    <div class="note" style="margin:6px 0">SPY QQQ NVDA AAPL TSLA + EUR/USD GBP/USD USD/JPY AUD/USD ทอง USD/THB · ฝึกบนข้อมูล Yahoo Finance ตามเวลาตลาดจริง กราฟ ${(B.tfs||[]).join("m/")}m · โหวตบนแท่งของแอปนี้ · หุ้นซื้ออย่างเดียว ไม่ถือข้ามคืน · ความเสี่ยงรวมฝูงนี้ ≤ ${((B.maxOpenRisk||0.02)*100).toFixed(0)}% · ${nv<2?"<b>ยังแทบไม่มีบอทที่กำไรหลังหักต้นทุน → หุ้น/Forex จะเข้าไม้น้อยมาก (กันเงินไว้) จนกว่าฝูงจะเจอสูตรที่ชนะ</b>":"กฎที่เรียนจากความผิดพลาด: "+((B.rules||[]).length?B.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี")}</div>
-   ${boostLine(B)}<table><tr><th>บอท${nv?"":" (ยังไม่มีตัวไหนโหวตได้: ตัวที่ใกล้สุด)"}</th><th>กลยุทธ์</th><th>TF</th><th>ไม้ที่ฝึก</th><th>เฉลี่ย R</th><th>ชนะ %</th></tr>${top.map(a=>`<tr><td>${a.id}</td><td>${CB_FAM[a.fam]||a.fam}</td><td>${a.tf}m</td><td class="num">${a.n}</td><td class="num ${cls(cbExp(a))}">${cbExp(a).toFixed(2)}</td><td class="num">${a.n?(100*a.wins/a.n).toFixed(0):0}</td></tr>`).join("")}</table>
+   ${boostLine(B)}<table><tr><th>บอท${nv?"":" (ยังไม่มีตัวไหนโหวตได้: ตัวที่ใกล้สุด)"}</th><th>กลยุทธ์</th><th>TF</th><th title="TP เทียบ SL (ได้:เสีย) · 🛡️ = ปล่อยกำไรวิ่ง">ได้:เสีย</th><th>ไม้ที่ฝึก</th><th>เฉลี่ย R</th><th>ชนะ %</th></tr>${top.map(a=>`<tr><td>${a.id}</td><td>${CB_FAM[a.fam]||a.fam}</td><td>${a.tf}m</td><td class="num">${(a.tp/a.sl).toFixed(1)}:1${a.be?" 🛡️":""}</td><td class="num">${a.n}</td><td class="num ${cls(cbExp(a))}">${cbExp(a).toFixed(2)}</td><td class="num">${a.n?(100*a.wins/a.n).toFixed(0):0}</td></tr>`).join("")}</table>
    ${fams.length?`<details style="margin-top:6px"><summary>คะแนน 13 ตระกูลกลยุทธ์ของฝูงนี้</summary><table><tr><th>ตระกูล</th><th>บอท</th><th>โหวตได้</th><th>ไม้ที่ฝึก</th><th>ดีสุด R/ไม้</th><th>เฉลี่ย</th></tr>${fams.map(([k,v])=>`<tr><td>${esc(v.label||k)}</td><td class="num">${v.bots}</td><td class="num">${v.voters}</td><td class="num">${v.trades}</td><td class="num ${cls(v.best)}">${(+v.best).toFixed(2)}</td><td class="num ${cls(v.avg)}">${(+v.avg).toFixed(2)}</td></tr>`).join("")}</table></details>`:""}</div>`}
 function cloudPanel(){const B=S.cloud.brain;
   if(!B)return `<div class="note" style="border:1px dashed var(--line);padding:8px;border-radius:6px;margin-bottom:10px">☁️ <b>สมองจาก cloud</b>: ยังไม่ได้รับ (รอไฟล์ brain.js จากงานซิงก์ทุก 4 ชม.) · ตอนนี้ Crypto ใช้บอทเดิม</div>`;
@@ -961,7 +970,7 @@ function cloudPanel(){const B=S.cloud.brain;
   return `<div style="border:1px solid var(--line);padding:10px;border-radius:6px;margin-bottom:12px"><b>☁️ สมองจากฝูงบอท 100 ตัวบน cloud</b> · รุ่น ${B.gen} · อัปเดต ${t} · บอทที่โหวตได้ ${B.agents.length}/100
    <button class="btn" id="cbToggle" style="margin-left:8px">${S.cloud.on?"✅ ใช้อยู่ (กดเพื่อปิด)":"⏸ ปิดอยู่ (กดเพื่อใช้)"}</button>
    <div class="note" style="margin:6px 0">Crypto 9 เหรียญ: บอทเหล่านี้โหวตเข้าไม้บนกราฟ 15m/1h/4h · ขนาดไม้ = 1% × ความแรงโหวต (ไม่เกิน Kelly/4) · ความเสี่ยงรวม Crypto ≤ ${((B.maxOpenRisk||0.02)*100).toFixed(0)}% · หุ้น/Forex ใช้ฝูงของตัวเอง (แผง ☁️📈 ด้านล่าง) · กฎที่เรียนจากความผิดพลาด: ${(B.rules||[]).length?B.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี"}</div>
-   ${boostLine(B)}<table><tr><th>บอท</th><th>กลยุทธ์</th><th>TF</th><th>ไม้ที่ฝึก</th><th>เฉลี่ย R</th><th>ชนะ %</th></tr>${top.map(a=>`<tr><td>${a.id}</td><td>${CB_FAM[a.fam]||a.fam}</td><td>${a.tf}m</td><td class="num">${a.n}</td><td class="num">${cbExp(a).toFixed(2)}</td><td class="num">${a.n?(100*a.wins/a.n).toFixed(0):0}</td></tr>`).join("")}</table>${cbLibrary(B)}</div>`}
+   ${boostLine(B)}<table><tr><th>บอท</th><th>กลยุทธ์</th><th>TF</th><th title="TP เทียบ SL (ได้:เสีย) · 🛡️ = ปล่อยกำไรวิ่ง">ได้:เสีย</th><th>ไม้ที่ฝึก</th><th>เฉลี่ย R</th><th>ชนะ %</th></tr>${top.map(a=>`<tr><td>${a.id}</td><td>${CB_FAM[a.fam]||a.fam}</td><td>${a.tf}m</td><td class="num">${(a.tp/a.sl).toFixed(1)}:1${a.be?" 🛡️":""}</td><td class="num">${a.n}</td><td class="num">${cbExp(a).toFixed(2)}</td><td class="num">${a.n?(100*a.wins/a.n).toFixed(0):0}</td></tr>`).join("")}</table>${cbLibrary(B)}</div>`}
 /* v0.8.3 (Thanat): formula library kept in the brain + a scoreboard of every strategy family the swarm is testing */
 function cbLibrary(B){const lib=B.library||[],F=B.fams||{};const fams=Object.entries(F).sort((x,y)=>(y[1].voters-x[1].voters)||(y[1].best-x[1].best));
   return `<div style="margin-top:10px"><b>📚 คลังสูตรของบอท</b>${lib.length?`<ul style="margin:4px 0 6px 18px">${lib.map(l=>`<li><b>${esc(l.name)}</b>${l.from?` <span style="color:var(--dim)">(จาก${esc(l.from)})</span>`:""}<br><span style="color:var(--dim)">${esc(l.use||"")}</span></li>`).join("")}</ul>`:`<div class="note">ยังไม่มีในสมองรุ่นนี้ (มากับรอบถัดไปของฝูงบอท)</div>`}
