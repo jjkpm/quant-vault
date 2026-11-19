@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.9.3 · 2026-11-19";
+const VERSION="v0.9.4 · 2026-11-20";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -835,7 +835,7 @@ const CB_TFS=[15,60,240], CB_IV={15:"15m",60:"1h",240:"4h"};
 const CB_TAG={against4h:"สวนเทรนด์ 4 ชม.",newswin:"ช่วงข่าวแรง",newsagainst:"สวนทางข่าว",volspike:"ผันผวนสูงผิดปกติ",highcost:"ต้นทุนสูงเมื่อเทียบกับ SL",weakvote:"เสียงโหวตก้ำกึ่ง",lowrr:"R:R ต่ำกว่า 1:2",pivotblock:"แนวรับ/ต้าน Pivot ขวางทางกำไร"};
 const CB_FAM={ema:"EMA cross",rsi:"RSI reversion",don:"Donchian breakout",bb:"Bollinger reversion",trend:"EMA trend re-entry",mom:"Momentum burst",squeeze:"Volatility squeeze",pull:"Trend pullback",macd:"MACD cross",stoch:"Stochastic reversion",kelt:"Keltner breakout",supert:"Supertrend flip",pivot:"Pivot points"};
 function mkApply(b,src){if(b&&b.agents&&b.market==="mk"&&(!S.mk.brain||b.updated>S.mk.brain.updated||(b.updated===S.mk.brain.updated&&!S.mk.loadedAt))){S.mk.brain=b;S.mk.loadedAt=Date.now();S.mk.src=src;save();
-  const nv=b.agents.filter(cbElig).length;learn(`☁️📈 โหลดสมองฝูงหุ้น/Forex: รุ่น ${b.gen} · บอทโหวตได้ ${nv} ตัว${nv<2?" (ยังหาสูตรที่ชนะหลังหักต้นทุนแทบไม่เจอ: หุ้น/Forex จะเข้าไม้น้อยมากจนกว่าฝูงจะเจอ)":""}`);try{renderBrain()}catch(e){}}}
+  const nv=b.agents.filter(a=>cbElig(a,b)).length;learn(`☁️📈 โหลดสมองฝูงหุ้น/Forex: รุ่น ${b.gen} · บอทโหวตได้ ${nv} ตัว${nv<2?" (ยังหาสูตรที่ชนะหลังหักต้นทุนแทบไม่เจอ: หุ้น/Forex จะเข้าไม้น้อยมากจนกว่าฝูงจะเจอ)":""}`);try{renderBrain()}catch(e){}}}
 function mkActive(){return !!(S.cloud.on&&S.mk&&S.mk.brain&&S.mk.brain.agents&&S.mk.brain.agents.length)}
 function cbApply(b,src){if(b&&b.agents&&(!S.cloud.brain||b.updated>S.cloud.brain.updated||(b.updated===S.cloud.brain.updated&&!S.cloud.loadedAt))){S.cloud.brain=b;S.cloud.loadedAt=Date.now();S.cloud.src=src;save();learn(`☁️ โหลดสมองจาก cloud: รุ่น ${b.gen} · บอทโหวตได้ ${b.agents.length} ตัว · กฎที่เรียนจากความผิดพลาด ${b.rules.length?b.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี"}`);try{renderBrain()}catch(e){}}}
 /* v0.7.1: on the website, read the brain straight from the public brain sheet (updated by the cloud swarm itself) — no file push needed.
@@ -890,13 +890,13 @@ function cbSig(fam,b,p){ /* signal on the LAST closed bar only */
       fu=(bu<fu||c[j-1]>fu)?bu:fu;fl=(bl>fl||c[j-1]<fl)?bl:fl;const nd=(d===-1&&c[j]>fu)?1:((d===1&&c[j]<fl)?-1:d);if(j===i)sig=(nd!==d&&j>=N+2)?nd:0;d=nd}
     return sig}
   return 0}
-const cbExp=a=>a.n?a.sR/a.n:0, cbW=a=>Math.exp(2*(cbExp(a)-1/Math.sqrt(a.n+1))), cbElig=a=>a.n>=10&&cbExp(a)>0;
+const cbExp=a=>a.n?a.sR/a.n:0, cbW=a=>Math.exp(2*(cbExp(a)-1/Math.sqrt(a.n+1))), cbElig=(a,B)=>{const e=(B&&B.elig)||(B&&B.market==="mk"?{minN:30,lcbPos:1}:{minN:10});return a.n>=e.minN&&(e.lcbPos?cbExp(a)-1/Math.sqrt(a.n+1)>0:cbExp(a)>0)}; /* v0.9.4: stocks/FX need >= 30 trained trades and LCB > 0 */
 async function cbFetch(sym,tf){const r=await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=${SYMS[sym].bn.toUpperCase()}&interval=${CB_IV[tf]}&limit=300`);const k=await r.json();
   const now=Date.now()/1000;return Array.isArray(k)?k.map(x=>[Math.floor(x[0]/1000),+x[1],+x[2],+x[3],+x[4]]).filter(x=>x[0]+tf*60<=now):[]}
 function cbDecide(sym,tf,b,b4,B){
   B=B||S.cloud.brain;const ag=B.agents.filter(a=>a.tf===tf);if(!ag.length||b.length<130)return null;
   const At=cbAtr(b.slice(-80)),A=At[At.length-1];if(!A)return null;
-  const voters=ag.filter(cbElig);if(!voters.length)return null;
+  const voters=ag.filter(a=>cbElig(a,B));if(!voters.length)return null;
   const fired=voters.map(a=>({a,s:cbSig(a.fam,b,a.p)})).filter(x=>x.s);if(!fired.length)return null;
   const tot=voters.reduce((x,a)=>x+cbW(a),0),score=fired.reduce((x,f)=>x+cbW(f.a)*f.s,0)/tot,d=score>0?1:-1,side=fired.filter(f=>f.s===d).map(f=>f.a);
   if(!(side.length>=2||(side.length===1&&side[0].n>=30))||Math.abs(score)<0.2)return {skip:`เสียงโหวตไม่พอ (คะแนน ${score.toFixed(2)}, เห็นด้วย ${side.length} ตัว)`};
@@ -958,7 +958,7 @@ function boostLine(B){const b=B&&B.boost;if(!b)return "";const f=x=>`${x[1]>=0?"
   return `<div class="note" style="margin:4px 0">${b.on?"✅ <b>เพิ่มเดิมพันไม้มั่นใจสูง: ปลดล็อกแล้ว</b> ไม้ที่โหวต ≥ "+b.minScore+" และ Kelly ≥ "+b.minKelly+" เสี่ยงได้ถึง "+(b.maxRisk*100).toFixed(0)+"%":"🔒 <b>เพิ่มเดิมพันไม้มั่นใจสูง: ยังล็อก</b> (ไม้ละ ≤ 1%) ต้องพิสูจน์ก่อนว่าไม้มั่นใจสูงชนะมากกว่าจริง"} · มั่นใจสูง ${f(b.hi)} vs ปกติ ${f(b.lo)} (เกณฑ์: อย่างละ ≥ ${b.minN} สัญญาณ, สูงกว่า ≥ 0.15R, LCB95 > 0)</div>`}
 function mkPanel(){const B=S.mk&&S.mk.brain;
   if(!B)return `<div class="note" style="border:1px dashed var(--line);padding:8px;border-radius:6px;margin-bottom:10px">☁️📈 <b>สมองฝูงหุ้น US + Forex</b>: ยังไม่ได้รับ (มากับรอบถัดไปของฝูงบอท cloud) · ตอนนี้หุ้น/Forex ใช้สมองในเครื่อง</div>`;
-  const t=new Date(B.updated*1000).toLocaleString("th-TH"),top=[...B.agents].sort((x,y)=>cbW(y)-cbW(x)).slice(0,8),F=B.fams||{},nv=B.agents.filter(cbElig).length; /* v0.9.1: count real voters (the pack falls back to the top 10 non-voters when none qualify) */
+  const t=new Date(B.updated*1000).toLocaleString("th-TH"),top=[...B.agents].sort((x,y)=>cbW(y)-cbW(x)).slice(0,8),F=B.fams||{},nv=B.agents.filter(a=>cbElig(a,B)).length; /* v0.9.1: count real voters (the pack falls back to the top 10 non-voters when none qualify) */
   const fams=Object.entries(F).sort((x,y)=>(y[1].voters-x[1].voters)||(y[1].best-x[1].best));
   return `<div style="border:1px solid var(--line);padding:10px;border-radius:6px;margin-bottom:12px"><b>☁️📈 สมองฝูงบอทหุ้น US + Forex/ทอง (100 ตัว)</b> · รุ่น ${B.gen} · อัปเดต ${t} · โหวตได้ ${nv}/100 ${S.cloud.on?"":"· ⏸ ปิดอยู่ (สวิตช์เดียวกับฝูง Crypto)"}
    <div class="note" style="margin:6px 0">SPY QQQ NVDA AAPL TSLA + EUR/USD GBP/USD USD/JPY AUD/USD ทอง USD/THB · ฝึกบนข้อมูล Yahoo Finance ตามเวลาตลาดจริง กราฟ ${(B.tfs||[]).join("m/")}m · โหวตบนแท่งของแอปนี้ · หุ้นซื้ออย่างเดียว ไม่ถือข้ามคืน · ความเสี่ยงรวมฝูงนี้ ≤ ${((B.maxOpenRisk||0.02)*100).toFixed(0)}% · ${nv<2?"<b>ยังแทบไม่มีบอทที่กำไรหลังหักต้นทุน → หุ้น/Forex จะเข้าไม้น้อยมาก (กันเงินไว้) จนกว่าฝูงจะเจอสูตรที่ชนะ</b>":"กฎที่เรียนจากความผิดพลาด: "+((B.rules||[]).length?B.rules.map(r=>CB_TAG[r]||r).join(", "):"ยังไม่มี")}</div>
