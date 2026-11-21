@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.9.5 · 2026-11-20";
+const VERSION="v0.9.7 · 2026-11-21";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -349,6 +349,13 @@ function nyParts(ms){const o={};for(const x of nyFmt.formatToParts(new Date(ms))
 function usSession(ms){const p=nyParts(ms);if(p.wd==="Sat"||p.wd==="Sun"||US_HOL.has(p.day))return null;return {open:570,close:US_EARLY.has(p.day)?780:960,min:p.min}}
 function usOpenAt(ms){const s=usSession(ms);return !!s&&s.min>=s.open&&s.min<s.close}
 function usMinsToClose(ms){const s=usSession(ms);return s&&s.min>=s.open&&s.min<s.close?s.close-s.min:null}
+/* v0.9.6: which closed bars may drive the bots. (1) US stocks: only regular-hours bars (09:30–16:00 NY), like the cloud engine (Yahoo includePrePost=false)
+   and Twelve Data history — pre/after-market prints from the live feed stay on the chart but no longer enter the bots' indicators/ATR.
+   (2) Any symbol: a bar that closed more than one bar-length ago (Mac asleep, overnight/weekend gap, first tick of the next session) is too old:
+   its close price is gone, so no shadow entry at that stale price and no swarm vote on it. */
+function rthBars(sym,arr){return SYMS[sym].grp==="US"?arr.filter(x=>usOpenAt(x.time*1000)):arr}
+function barLive(sym,tf,bar,nowMs){if((nowMs||Date.now())/1000-(bar.time+tf)>tf){staleNote(sym,tf,bar);return false}return SYMS[sym].grp!=="US"||usOpenAt(bar.time*1000)}
+let staleT=0;function staleNote(sym,tf,bar){if(Date.now()-staleT<3600e3)return;staleT=Date.now();try{learn(`⏭ ข้ามแท่งเก่า ${SYMS[sym].name} ${tf/60}m (ปิดไปตั้งแต่ ${bkkHm(bar.time*1000+tf*1000)} น.: เครื่องหลับ/ตลาดเพิ่งเปิดหลังช่วงปิด) · บอทไม่เข้าไม้จากราคาที่ผ่านไปแล้ว รอแท่งถัดไป`)}catch(e){}}
 /* v0.8.3: show US hours in Bangkok time computed from the real New York session (DST + early closes), not a fixed "21:30–04:00" (wrong from mid-March to early November) */
 const bkkFmt=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Bangkok",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
 const bkkDayFmt=new Intl.DateTimeFormat("th-TH",{timeZone:"Asia/Bangkok",weekday:"short",day:"numeric",month:"short"});
@@ -500,15 +507,17 @@ function learn(msg){S.bot.log.unshift({t:Date.now(),msg});if(S.bot.log.length>30
 /* v0.9.0: stocks/forex — the market swarm votes on this app's own closed 5m/15m bars (Twelve Data history + live ticks) */
 function mkOnBar(sym,tf,bar){
   if(!mkActive()||SYMS[sym].grp==="CR"||window.__noMk)return;const B=S.mk.brain,tm=tf/60;if(!(B.tfs||[15]).includes(tm))return;
+  if(!barLive(sym,tf,bar))return; /* v0.9.6: regular-hours bars only for stocks (same bars the swarm trained on) · never vote on a stale bar */
   const key=sym+"@"+tm;if(S.mk.lastBar[key]===bar.time)return;S.mk.lastBar[key]=bar.time;
-  const b=M[sym].bars[tf].map(x=>[x.time,x.open,x.high,x.low,x.close]).filter(x=>x[0]<=bar.time).slice(-300);
+  const b=rthBars(sym,M[sym].bars[tf]).map(x=>[x.time,x.open,x.high,x.low,x.close]).filter(x=>x[0]<=bar.time).slice(-300);
   const r=cbDecide(sym,tm,b,null,B);if(!r)return;
   if(r.skip){if(!/เสียงโหวตไม่พอ/.test(r.skip))learn(`☁️📈 ${SYMS[sym].name} ${tm}m: ข้ามสัญญาณ · ${r.skip}`);return}
   cbAct(sym,tm,r,B)}
 function onBarClose(sym,tf,bar){
   try{mkOnBar(sym,tf,bar)}catch(e){}
   if(tf!==+S.settings.botTf) return; /* every symbol shadow-trades & learns; only bot symbols place orders */
-  const b=M[sym].bars[tf].concat([bar]).filter((x,i,a)=>i===0||x.time>a[i-1].time); // closed bars incl. this
+  if(!barLive(sym,tf,bar)) return; /* v0.9.6: stocks learn/trade on regular-hours bars only · no entry from a bar that closed long ago */
+  const b=rthBars(sym,M[sym].bars[tf].concat([bar]).filter((x,i,a)=>i===0||x.time>a[i-1].time)); // closed bars incl. this
   const A=atr(b.slice(-60),14); if(!A) return;
   const fired=[];
   for(const ag of agents(sym)){
@@ -520,6 +529,7 @@ function onBarClose(sym,tf,bar){
   if(fired.length&&botTrades(sym)) botAct(sym,fired,A);
 }
 function shadowTick(sym){
+  if(SYMS[sym].grp==="US"&&!usOpenAt(Date.now()))return; /* v0.9.6: like real stock positions (and the cloud engine), shadow SL/TP don't fill on pre/after-market prints */
   const px=M[sym].last;
   for(const ag of agents(sym)){const p=ag.pos;if(!p||p.sym!==sym)continue;
     const hitSL=p.dir>0?px<=p.sl:px>=p.sl, hitTP=p.dir>0?px>=p.tp:px<=p.tp;
@@ -557,7 +567,7 @@ function evolve(ag){
   }
 }
 function warmBot(sym){ /* replay recent history so agents start with experience */
-  const tf=+S.settings.botTf; const b=M[sym].bars[tf]; if(b.length<120||S.bot["warm2_"+sym+tf]) return; /* v0.5.2: re-warm once with costs */
+  const tf=+S.settings.botTf; const b=rthBars(sym,M[sym].bars[tf]); if(b.length<120||S.bot["warm2_"+sym+tf]) return; /* v0.9.6: stocks warm up on regular-hours bars only */ /* v0.5.2: re-warm once with costs */
   for(const ag of agents(sym)){let pos=null;
     for(let i=60;i<b.length;i++){const w=b.slice(0,i+1),bar=b[i];
       if(pos){const hitSL=pos.dir>0?bar.low<=pos.sl:bar.high>=pos.sl,hitTP=pos.dir>0?bar.high>=pos.tp:bar.low<=pos.tp;
@@ -835,8 +845,8 @@ setTimeout(()=>{if(window.__selftest)return;const any=Object.values(M).some(m=>m
 S.cloud=S.cloud||{on:true,brain:null,lastBar:{},loadedAt:0};
 S.mk=S.mk||{brain:null,lastBar:{},loadedAt:0}; /* v0.9.0: second cloud swarm for US stocks + forex/gold (Yahoo data), same on/off switch as the crypto swarm */
 const CB_TFS=[15,60,240], CB_IV={15:"15m",60:"1h",240:"4h"};
-const CB_TAG={against4h:"สวนเทรนด์ 4 ชม.",newswin:"ช่วงข่าวแรง",newsagainst:"สวนทางข่าว",volspike:"ผันผวนสูงผิดปกติ",highcost:"ต้นทุนสูงเมื่อเทียบกับ SL",weakvote:"เสียงโหวตก้ำกึ่ง",lowrr:"R:R ต่ำกว่า 1:2",pivotblock:"แนวรับ/ต้าน Pivot ขวางทางกำไร"};
-const CB_FAM={ema:"EMA cross",rsi:"RSI reversion",don:"Donchian breakout",bb:"Bollinger reversion",trend:"EMA trend re-entry",mom:"Momentum burst",squeeze:"Volatility squeeze",pull:"Trend pullback",macd:"MACD cross",stoch:"Stochastic reversion",kelt:"Keltner breakout",supert:"Supertrend flip",pivot:"Pivot points"};
+const CB_TAG={against4h:"สวนเทรนด์ 4 ชม.",newswin:"ช่วงข่าวแรง",newsagainst:"สวนทางข่าว",volspike:"ผันผวนสูงผิดปกติ",highcost:"ต้นทุนสูงเมื่อเทียบกับ SL",weakvote:"เสียงโหวตก้ำกึ่ง",lowrr:"R:R ต่ำกว่า 1:2",pivotblock:"แนวรับ/ต้าน Pivot ขวางทางกำไร",mcweak:"Time Machine: โอกาสต่ำกว่าจุดคุ้มทุน"};
+const CB_FAM={ema:"EMA cross",rsi:"RSI reversion",don:"Donchian breakout",bb:"Bollinger reversion",trend:"EMA trend re-entry",mom:"Momentum burst",squeeze:"Volatility squeeze",pull:"Trend pullback",macd:"MACD cross",stoch:"Stochastic reversion",kelt:"Keltner breakout",supert:"Supertrend flip",pivot:"Pivot points",orb:"Opening-range breakout"};
 function mkApply(b,src){if(b&&b.agents&&b.market==="mk"&&(!S.mk.brain||b.updated>S.mk.brain.updated||(b.updated===S.mk.brain.updated&&!S.mk.loadedAt))){S.mk.brain=b;S.mk.loadedAt=Date.now();S.mk.src=src;save();
   const nv=b.agents.filter(a=>cbElig(a,b)).length;learn(`☁️📈 โหลดสมองฝูงหุ้น/Forex: รุ่น ${b.gen} · บอทโหวตได้ ${nv} ตัว${nv<2?" (ยังหาสูตรที่ชนะหลังหักต้นทุนแทบไม่เจอ: หุ้น/Forex จะเข้าไม้น้อยมากจนกว่าฝูงจะเจอ)":""}`);try{renderBrain()}catch(e){}}}
 function mkActive(){return !!(S.cloud.on&&S.mk&&S.mk.brain&&S.mk.brain.agents&&S.mk.brain.agents.length)}
@@ -892,7 +902,31 @@ function cbSig(fam,b,p){ /* signal on the LAST closed bar only */
     for(let j=1;j<n;j++){const hl=(b[j][2]+b[j][3])/2,bu=hl+p.m*at[j],bl=hl-p.m*at[j];if(fu===null){fu=bu;fl=bl;continue}
       fu=(bu<fu||c[j-1]>fu)?bu:fu;fl=(bl>fl||c[j-1]<fl)?bl:fl;const nd=(d===-1&&c[j]>fu)?1:((d===1&&c[j]<fl)?-1:d);if(j===i)sig=(nd!==d&&j>=N+2)?nd:0;d=nd}
     return sig}
+  if(fam==="orb"){ /* v0.9.7 = engine cloud-2.9: opening-range breakout at the NY 9:30 open (day-trader skill) */
+    let tfm=Infinity;for(let k=Math.max(1,n-50);k<n;k++)tfm=Math.min(tfm,(b[k][0]-b[k-1][0])/60);const m=p.m;if(!(tfm>0)||tfm>=60||tfm>m)return 0;
+    const need=Math.ceil(m/tfm),P=j=>nyParts(b[j][0]*1000),pi=P(i);if(pi.wd==="Sat"||pi.wd==="Sun")return 0;
+    let hi=null,lo=null,cnt=0,fired=false;
+    for(let j=i;j>=0;j--){const q=P(j);if(q.day!==pi.day)break;if(q.min>=570&&q.min<570+m){hi=hi===null?b[j][2]:Math.max(hi,b[j][2]);lo=lo===null?b[j][3]:Math.min(lo,b[j][3]);cnt++}}
+    if(hi===null||cnt<need||pi.min<570+m||pi.min+tfm>930)return 0;
+    for(let j=i-1;j>=0;j--){const q=P(j);if(q.day!==pi.day)break;if(q.min<570+m||q.min+tfm>930)continue;if(c[j]>hi||c[j]<lo){fired=true;break}}
+    if(fired)return 0;if(c[i]>hi)return 1;if(c[i]<lo)return -1;return 0}
   return 0}
+/* v0.9.7 = engine cloud-2.9 Time Machine (day-trader skill): replay the rest of the trade 2,000 times from this symbol's own recent
+   bars (same time of day ±2 bars when there are >= 20, else all bars), stop checked before target. Same rule as the engine; the
+   random draws differ (JS vs Python), so odds can differ by a point or two. Returns [targetFirst, stopFirst] or null. */
+function cbTM(b,d,slF,tpF,tf,sym,t){
+  if(b.length<121||!(slF>0))return null;const step=tf*60,day=86400,rows=[];
+  for(let j=1;j<b.length;j++){const pc=b[j-1][4];if(pc>0)rows.push([Math.floor((b[j][0]%day)/step),b[j][2]/pc,b[j][3]/pc,b[j][4]/pc])}
+  if(rows.length<120)return null;const nslot=Math.max(1,Math.floor(day/step)),bk={};for(const r of rows)(bk[r[0]]=bk[r[0]]||[]).push(r);
+  let H=({5:96,15:96,60:48,240:30})[tf]||48;if(SYMS[sym]&&SYMS[sym].grp==="US"){const m=usMinsToClose(t*1000);H=Math.min(H,Math.max(0,Math.floor((m||0)/tf)))}
+  if(H<=0)return null;const s0=Math.floor((t%day)/step),pools=[];
+  for(let k=0;k<H;k++){const sl=(s0+k)%nslot;let cand=[];for(let w=-2;w<=2;w++)cand=cand.concat(bk[((sl+w)%nslot+nslot)%nslot]||[]);pools.push(cand.length>=20?cand:rows)}
+  let seed=([...sym].reduce((x,ch)=>x+ch.charCodeAt(0),0)*1000003+t)>>>0;const rnd=()=>{seed=(seed+0x6D2B79F5)>>>0;let z=seed;z=Math.imul(z^(z>>>15),z|1);z^=z+Math.imul(z^(z>>>7),z|61);return((z^(z>>>14))>>>0)/4294967296};
+  const N=2000,sF=1-d*slF,tF=1+d*tpF;let tg=0,st=0;
+  for(let r=0;r<N;r++){let px=1,res=0;for(let k=0;k<H;k++){const q=pools[k][Math.floor(rnd()*pools[k].length)],hi=px*q[1],lo=px*q[2];
+      if(d>0){if(lo<=sF){res=-1;break}if(hi>=tF){res=1;break}}else{if(hi>=sF){res=-1;break}if(lo<=tF){res=1;break}}px*=q[3]}
+    if(res>0)tg++;else if(res<0)st++}
+  return [tg/N,st/N]}
 const cbExp=a=>a.n?a.sR/a.n:0, cbW=a=>Math.exp(2*(cbExp(a)-1/Math.sqrt(a.n+1))), cbElig=(a,B)=>{const e=(B&&B.elig)||(B&&B.market==="mk"?{minN:30,lcbPos:1}:{minN:10});return a.n>=e.minN&&(e.lcbPos?cbExp(a)-1/Math.sqrt(a.n+1)>0:cbExp(a)>0)}; /* v0.9.5: stocks/FX need >= 30 trained trades and LCB > 0 */
 async function cbFetch(sym,tf){const r=await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=${SYMS[sym].bn.toUpperCase()}&interval=${CB_IV[tf]}&limit=300`);const k=await r.json();
   const now=Date.now()/1000;return Array.isArray(k)?k.map(x=>[Math.floor(x[0]/1000),+x[1],+x[2],+x[3],+x[4]]).filter(x=>x[0]+tf*60<=now):[]}
@@ -909,6 +943,7 @@ function cbDecide(sym,tf,b,b4,B){
   const cR=costPx(sym,e)/slD;if(cR>0.25)tags.push("highcost");if(Math.abs(score)<0.35)tags.push("weakvote");
   if(tpm/slm<2)tags.push("lowrr"); /* v0.8.5: R:R < 1:2 (tested by the swarm, avoided only if it keeps losing) */
   {const h=cbPrevDay(b,b.length-1);if(h){const [pp,r1,s1]=cbPivots(h);if((d===1&&e<r1&&r1<e+tpD)||(d===-1&&e-tpD<s1&&s1<e))tags.push("pivotblock")}}
+  const mc=cbTM(b,d,slD/e,tpD/e,tf,sym,b[b.length-1][0]+tf*60);if(mc){const sd=mc[0]+mc[1],be=1/(1+tpm/slm);if(sd>=0.2&&mc[0]/sd<be-0.05)tags.push("mcweak")} /* v0.9.7 Time Machine tag (tested by the swarm, avoided only if it keeps losing) */
   const bad=tags.filter(t=>(B.rules||[]).includes(t));if(bad.length)return {skip:`เลี่ยงตามบทเรียน: ${bad.map(t=>CB_TAG[t]).join(", ")}`};
   const n=side.reduce((x,a)=>x+a.n,0),w=side.reduce((x,a)=>x+a.wins,0),pw=n?w/n:0,rr=tpm/slm-cR,kelly=rr>0?pw-(1-pw)/rr:-1;
   if(kelly<=0)return {skip:"Kelly ติดลบ (สถิติของบอทที่โหวตยังไม่คุ้มเสี่ยง)"};
@@ -1074,7 +1109,7 @@ if(!S.bot.v81td){S.bot.v81td=1;try{const t=tdState();if(t.used>=t.cap){t.used=Ma
 if(S.bot.v80tf===1){S.bot.v80tf=2;learn("อัปเดต v0.8.0: เปลี่ยน Timeframe ที่บอท Forex/หุ้นใช้จาก 1 นาที → 15 นาที เพราะแท่ง 1 นาทีทำให้ SL แคบกว่าต้นทุน (สเปรด+ค่าธรรมเนียม) บอทเลยต้องข้ามแทบทุกไม้ · เปลี่ยนกลับได้ในตั้งค่า")}
 if(!S.bot.v80log){S.bot.v80log=1;learn("อัปเดต v0.8.0: เพิ่ม Crypto 6 เหรียญ (BNB XRP DOGE ADA AVAX LINK · ใช้สมองฝูงบอท cloud) + ตลาดใหม่หุ้น US 5 ตัว (SPY QQQ NVDA AAPL TSLA · ตามเวลาตลาดนิวยอร์ก ซื้อได้อย่างเดียว ไม่ถือข้ามคืน) · บอทถือพร้อมกันได้ 8 ไม้ ความเสี่ยงรวม ≤5%")}
 renderAlert();
-window.QV={onTick,S,M,agents,costPx,shadowR,openPos,closePos,taxSummary,pit,guardian,lossAlert,checkLossAlerts,readiness,chargeSwaps,cbDecide,cbAct,cbSig,cloudTick,mkApply,mkActive,mkOnBar,breakEven,tradable,usOpenAt,usMinsToClose,usSession,usNextSession,usHoursTxt,fxReopenTxt,botStatus,lastOpenSym,flattenUs,botOpenRisk,botAct,botRoom,usPriority,nonUsRiskRoom,marginUsd,TD_SYMS,tdSync,cbApply};
+window.QV={onTick,rthBars,barLive,S,M,agents,costPx,shadowR,openPos,closePos,taxSummary,pit,guardian,lossAlert,checkLossAlerts,readiness,chargeSwaps,cbDecide,cbAct,cbSig,cloudTick,mkApply,mkActive,mkOnBar,breakEven,tradable,usOpenAt,usMinsToClose,usSession,usNextSession,usHoursTxt,fxReopenTxt,botStatus,lastOpenSym,flattenUs,botOpenRisk,botAct,botRoom,usPriority,nonUsRiskRoom,marginUsd,TD_SYMS,tdSync,cbApply};
 </script>
 </body>
 </html>
