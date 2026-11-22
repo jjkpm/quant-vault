@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.9.9 · 2026-11-22";
+const VERSION="v0.9.10 · 2026-11-22";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -236,8 +236,8 @@ const SYMS={
   AUDUSD:{grp:"FX",name:"AUD/USD",fh:"OANDA:AUD_USD",pip:0.0001,lot:100000,quote:"USD",spread:1.2,dp:5},
   XAUUSD:{grp:"FX",name:"XAU/USD ทองคำ",fh:"OANDA:XAU_USD",pip:0.01,lot:100,quote:"USD",spread:25,dp:2},
   USDTHB:{grp:"FX",name:"USD/THB",fh:"OANDA:USD_THB",pip:0.01,lot:100000,quote:"THB",base:"USD",spread:3,dp:3},
-  BTCUSDT:{grp:"CR",name:"BTC/USDT",bn:"btcusdt",pip:1,lot:1,quote:"USD",spreadPct:0.0002,fee:0.001,dp:2,step:0.001},
-  ETHUSDT:{grp:"CR",name:"ETH/USDT",bn:"ethusdt",pip:0.1,lot:1,quote:"USD",spreadPct:0.0002,fee:0.001,dp:2,step:0.01},
+  BTCUSDT:{grp:"CR",name:"BTC/USDT",bn:"btcusdt",pip:1,lot:1,quote:"USD",spreadPct:0.0002,fee:0.001,dp:2,step:0.0001},
+  ETHUSDT:{grp:"CR",name:"ETH/USDT",bn:"ethusdt",pip:0.1,lot:1,quote:"USD",spreadPct:0.0002,fee:0.001,dp:2,step:0.001}, /* v0.9.9: finer bot lot steps (Binance allows 0.00001 BTC / 0.0001 ETH): 0.001 BTC ≈ $90 was too coarse for a 0.5% risk trade */
   SOLUSDT:{grp:"CR",name:"SOL/USDT",bn:"solusdt",pip:0.01,lot:1,quote:"USD",spreadPct:0.0003,fee:0.001,dp:3,step:0.1},
   /* v0.8.0: 6 more coins (same list as the cloud swarm cloud-2.2; spread >= 1 tick at Nov 2026 prices) */
   BNBUSDT:{grp:"CR",name:"BNB/USDT",bn:"bnbusdt",pip:0.01,lot:1,quote:"USD",spreadPct:0.0002,fee:0.001,dp:2,step:0.001},
@@ -398,7 +398,8 @@ function rollDay(){const d=new Date().toISOString().slice(0,10);if(S.acct.dayDat
 function openPos(sym,dir,size,slPips,tpPips,by,meta){
   const [b,a]=bidAsk(sym); if(b==null){toast("ยังไม่มีราคาสดของ "+SYMS[sym].name);return null}
   const c=SYMS[sym], slip=spreadAbs(sym)*Math.random()*0.5, entry=(dir>0?a:b)+dir*slip; /* v0.5: market-order slippage 0–0.5 spread */
-  size=Math.max(c.step||0.01,Math.round(size/(c.step||0.01))*(c.step||0.01));
+  const st=c.step||0.01; if(by==="bot"){size=Math.floor(size/st+1e-9)*st;if(size<st-1e-12)return null} /* v0.9.9: bot orders round DOWN to the lot step, so rounding can never push a trade above its planned risk (0.5% / 1%) or the 2% Crypto / 5% all-bot caps (v0.9.8 rounded BTC 0.00288→0.003 = 0.52% risk, Crypto total 2.001%) */
+  else size=Math.max(st,Math.round(size/st)*st);
   const pos={id:Date.now()+Math.random().toString(36).slice(2,6),sym,dir,size:+size.toFixed(4),entry,open:Date.now(),
     sl:slPips>0?entry-dir*slPips*c.pip:null,tp:tpPips>0?entry+dir*tpPips*c.pip:null,by,meta:meta||null,swap:0,swapDay:""};
   if(pos.sl!=null) pos.risk=(Math.abs(entry-pos.sl)+costPx(sym,entry))*units(sym,pos.size)*usdPerQuote(sym,entry); /* v0.5.2: worst-case loss at SL incl. fees+slippage */
@@ -615,7 +616,7 @@ function botAct(sym,fired,A){
   const pick=fired.filter(f=>pickable(f.ag,maxW)&&(SYMS[sym].grp!=="US"||f.s>0)).sort((x,y)=>y.ag.w-x.ag.w)[0]; /* v0.8.0: US stocks long only */
   if(!pick) return;
   const name=FAM[pick.ag.fam].label, dirTxt=pick.s>0?"BUY":"SELL";
-  if(provenOnly()){shadowNote(sym,`🧠 สมองในเครื่อง (${name}) ${dirTxt}`);return} /* v0.9.9 */
+  if(provenOnly()){shadowNote(sym,`🧠 สมองในเครื่อง (${name}) ${dirTxt}`);return} /* v0.9.10 */
   if(S.bot.mode==="signal"){toast(`📣 สัญญาณ ${dirTxt} ${SYMS[sym].name} จาก ${name} (น้ำหนัก ${pick.ag.w.toFixed(2)})`);notify(`สัญญาณ ${dirTxt} ${SYMS[sym].name}`,name);return}
   const g=guardian(); renderGuard(g); if(!g.ok) return;
   if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===sym)) return; /* one bot position per symbol */
@@ -974,7 +975,7 @@ function cbAct(sym,tf,r,B){
   B=B||S.cloud.brain;const mk=B.market==="mk";   /* v0.9.0: same execution for the stocks/forex swarm */
   if(mk&&(!tradable(sym,"bot")||(SYMS[sym].grp==="US"&&r.d<0)))return;
   const c=SYMS[sym],dirTxt=r.d>0?"BUY":"SELL",who=r.side.slice(0,6).map(a=>a.id).join(",");
-  if(provenOnly()){shadowNote(sym,`${mk?"☁️📈":"☁️"} ฝูงบอท ${tf}m ${dirTxt}`);return} /* v0.9.9 */
+  if(provenOnly()){shadowNote(sym,`${mk?"☁️📈":"☁️"} ฝูงบอท ${tf}m ${dirTxt}`);return} /* v0.9.10 */
   if(S.bot.mode==="signal"){toast(`📣 ☁️ ฝูงบอท: ${dirTxt} ${c.name} ${tf}m (คะแนนโหวต ${r.score.toFixed(2)})`);notify(`ฝูงบอท: ${dirTxt} ${c.name}`,`${tf}m · ${who}`);return}
   const g=guardian();renderGuard(g);if(!g.ok)return;
   if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===sym))return;
@@ -1026,7 +1027,7 @@ document.addEventListener("click",e=>{if(e.target&&e.target.id==="cbToggle"){S.c
    Rules: at each daily close (07:00 BKK) close > 55-day high → BUY, close < 55-day low → SELL · stop = 10-day channel (min 1 ATR20)
    · no TP (let it run) · after every daily close the stop moves to the 10-day channel, only in the trade's favour · risk 0.5 %/trade
    inside the same caps as every bot (Crypto open risk ≤ 2 %, all bots ≤ 5 %, Guardian, 1 position per coin). */
-/* v0.9.9: real trades only from bots that passed the walk-forward gate (today: 📈 daily trend). The 15m/1h/4h swarms and the local
+/* v0.9.10: real trades only from bots that passed the walk-forward gate (today: 📈 daily trend). The 15m/1h/4h swarms and the local
    brain lost −0.18…−0.20R per trade after costs in a 9-month production replay, so they keep learning in the shadows and send no
    real orders or signals until a strategy of theirs passes the same gate. Positions already open keep their SL/TP. */
 S.proven=S.proven===undefined?true:S.proven;
@@ -1063,7 +1064,7 @@ function dtEnter(sym,r,lateS){const c=SYMS[sym],dirTxt=r.d>0?"BUY":"SELL",tag=`�
   const risk=Math.min(DT.risk,0.02-openRisk,nonUsRiskRoom()/100);
   if(risk<0.0025){learn(`${tag}: ข้าม ความเสี่ยงรวม Crypto เต็ม (${(openRisk*100).toFixed(2)}% จากเพดาน 2%)`);return}
   if(!botRoom(sym,risk*100))return;
-  const slD=Math.abs(px-stop),perUnit=(slD+costPx(sym))*usdPerQuote(sym,px);let size=equity()*risk/perUnit/c.lot;if(!(size>0))return;
+  const slD=Math.abs(px-stop)+spreadAbs(sym),perUnit=(slD+costPx(sym))*usdPerQuote(sym,px); /* v0.9.9: size for the worst fill (ask/bid + up to 0.5 spread slippage), because the stop stays at the tested level */let size=equity()*risk/perUnit/c.lot;if(!(size>0))return;
   const m1=marginUsd({sym,size:1,entry:px}),freeM=equity()-usedMargin();if(m1>0)size=Math.min(size,0.25*freeM/m1);if(size<(c.step||0.01))return;
   const pos=openPos(sym,r.d,size,slD/c.pip,0,"bot",{strat:"📈 1D Donchian 55/10",dt:1,tf:1440,riskPct:+(risk*100).toFixed(3)});
   if(pos){pos.sl=stop;pos.risk=(Math.abs(pos.entry-stop)+costPx(sym,pos.entry))*units(sym,pos.size)*usdPerQuote(sym,pos.entry); /* stop exactly at the tested level (entry slippage does not move it) */
