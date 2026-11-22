@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.9.7 · 2026-11-21";
+const VERSION="v0.9.8 · 2026-11-22";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -696,7 +696,7 @@ function brainSummary(){const rows=Object.keys(SYMS).map(k=>{const B=S.bot.brain
 function costRtxt(k,ag){const b=M[k].bars[+S.settings.botTf]||[];const A=b.length>20?atr(b.slice(-60),14):null;if(!A||!ag)return"—";const r=costPx(k)/(A*ag.sl);return `<span class="${r>0.5?"neg":""}">${r.toFixed(2)}R</span>`}
 function renderBrain(){
   const A=agents(curSym),maxW=Math.max(...A.map(a=>a.w));
-  $("t-brain").innerHTML=cloudPanel()+mkPanel()+`<p class="note">แต่ละคู่มี "สมอง" แยกของตัวเอง ทุกกลยุทธ์เทรดเงาบนกราฟจริงตลอดเวลา (timeframe ${S.settings.botTf/60} นาที) แล้วบอทเทรดในบัญชีจำลองตามตัวที่น้ำหนักสูง · บอทเทรด: ${botSymsLabel()} · รุ่นที่ ${S.bot.gen}</p>${brainSummary()}<h4 style="margin:12px 0 6px">สมองของ ${SYMS[curSym].name} (คู่ที่ดูอยู่)</h4><div class="strat">`+
+  $("t-brain").innerHTML=dtPanel()+cloudPanel()+mkPanel()+`<p class="note">แต่ละคู่มี "สมอง" แยกของตัวเอง ทุกกลยุทธ์เทรดเงาบนกราฟจริงตลอดเวลา (timeframe ${S.settings.botTf/60} นาที) แล้วบอทเทรดในบัญชีจำลองตามตัวที่น้ำหนักสูง · บอทเทรด: ${botSymsLabel()} · รุ่นที่ ${S.bot.gen}</p>${brainSummary()}<h4 style="margin:12px 0 6px">สมองของ ${SYMS[curSym].name} (คู่ที่ดูอยู่)</h4><div class="strat">`+
    A.sort((x,y)=>y.w-x.w).map(a=>`<div class="s"><b><span>${FAM[a.fam].label}</span><span class="num">${a.role==="champ"?"แชมป์":"ท้าชิง"}</span></b>
    <div class="wbar"><i style="width:${(a.w/maxW*100).toFixed(0)}%"></i></div>
    <div class="num">น้ำหนัก ${a.w.toFixed(2)} · ${a.trades} ไม้ · ชนะ ${a.trades?(a.wins/a.trades*100).toFixed(0):0}% · ${exp(a).toFixed(2)}R/ไม้</div>
@@ -1016,6 +1016,57 @@ function cbLibrary(B){const lib=B.library||[],F=B.fams||{};const fams=Object.ent
    <div class="note" style="margin:2px 0 6px">สูตรในคลังเป็นเครื่องมือ ไม่ใช่คำสั่ง: ฝูงบอทยังลองสูตรอื่นทุกรอบ (กลายพันธุ์พารามิเตอร์ + สุ่มสำรวจตระกูลใหม่) แล้วให้สิทธิ์โหวตเฉพาะตัวที่ยังกำไรหลังหักต้นทุน</div>
    ${fams.length?`<table><tr><th>ตระกูลกลยุทธ์</th><th>บอท</th><th>โหวตได้</th><th>ไม้ที่ฝึก</th><th>ตัวที่ดีสุด R/ไม้</th><th>เฉลี่ยทั้งตระกูล</th></tr>${fams.map(([k,v])=>`<tr><td>${esc(v.label||CB_FAM[k]||k)}${(lib.find(l=>(l.fams||[]).includes(k)))?" 📚":""}</td><td class="num">${v.bots}</td><td class="num">${v.voters}</td><td class="num">${v.trades}</td><td class="num ${cls(v.best)}">${(+v.best).toFixed(2)}</td><td class="num ${cls(v.avg)}">${(+v.avg).toFixed(2)}</td></tr>`).join("")}</table>`:""}</div>`}
 document.addEventListener("click",e=>{if(e.target&&e.target.id==="cbToggle"){S.cloud.on=!S.cloud.on;save();learn(S.cloud.on?"☁️ เปิดใช้สมองจาก cloud สำหรับ Crypto":"☁️ ปิดสมองจาก cloud (Crypto กลับไปใช้บอทเดิม)");renderBrain()}});
+/* ===================== v0.9.8: 📈 daily trend bot (Donchian 55/10, long + short, 9 coins) =====================
+   Why: the 15m/1h/4h swarm consensus had ~0 edge before costs in a 9-month production replay (−0.18…−0.20R/trade after costs).
+   This rule passed the pre-registered walk-forward gate on daily bars 2021-01→2025-11 (Sharpe 0.92, 95 % lower bound > 0, 199 trades,
+   win 43 %, avg win 2.7× avg loss) and was positive on the untouched holdout year 2025-11-22→2026-11-21 (+4.7 %, Sharpe 0.93, mdd 2.8 %)
+   while buy & hold lost 44 %. Reference + tests: wf/dt_ref.py (decisions identical, see CHANGELOG).
+   Rules: at each daily close (07:00 BKK) close > 55-day high → BUY, close < 55-day low → SELL · stop = 10-day channel (min 1 ATR20)
+   · no TP (let it run) · after every daily close the stop moves to the 10-day channel, only in the trade's favour · risk 0.5 %/trade
+   inside the same caps as every bot (Crypto open risk ≤ 2 %, all bots ≤ 5 %, Guardian, 1 position per coin). */
+S.dtr=S.dtr||{on:true,lastDay:{}};
+const DT={N:55,M:10,atr:20,risk:0.005,staleH:12};
+function dtSig(b){const k=b.length-1;if(k<Math.max(DT.N,DT.atr)+1)return null;
+  const c=b[k][4];let hiN=-Infinity,loN=Infinity;for(let j=k-DT.N;j<k;j++){if(b[j][2]>hiN)hiN=b[j][2];if(b[j][3]<loN)loN=b[j][3]}
+  let lo=Infinity,hi=-Infinity;for(let j=k-DT.M+1;j<=k;j++){if(b[j][3]<lo)lo=b[j][3];if(b[j][2]>hi)hi=b[j][2]}
+  let tr=0;for(let j=k-DT.atr+1;j<=k;j++){const h=b[j][2],l=b[j][3],pc=b[j-1][4];tr+=Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc))}
+  const A=tr/DT.atr,d=c>hiN?1:c<loN?-1:0,ext=d>0?lo:hi;return {d,c,A,lo,hi,dist:d?Math.max(Math.abs(c-ext),A):null}}
+async function dtFetch(sym){const r=await fetch(`https://data-api.binance.vision/api/v3/klines?symbol=${SYMS[sym].bn.toUpperCase()}&interval=1d&limit=120`);const k=await r.json();
+  const now=Date.now()/1000;return Array.isArray(k)?k.map(x=>[Math.floor(x[0]/1000),+x[1],+x[2],+x[3],+x[4]]).filter(x=>x[0]+86400<=now):[]}
+async function dtTick(){if(window.__selftest||!S.dtr.on)return;const now=Math.floor(Date.now()/1000),dayT=Math.floor(now/86400)*86400-86400;
+  for(const sym of Object.keys(SYMS).filter(k=>SYMS[k].grp==="CR")){
+    if(S.dtr.lastDay[sym]===dayT)continue;let b;try{b=await dtFetch(sym)}catch(e){continue}
+    if(!b.length||b[b.length-1][0]!==dayT)continue;S.dtr.lastDay[sym]=dayT;save();
+    const r=dtSig(b);if(!r)continue;
+    for(const p of S.acct.positions.filter(p=>p.sym===sym&&p.meta&&p.meta.dt)){const ext=p.dir>0?r.lo:r.hi;
+      if(p.dir>0?ext>p.sl:ext<p.sl){const old=p.sl;p.sl=ext;save();learn(`📈 เทรนด์รายวัน ${SYMS[sym].name} ${p.dir>0?"BUY":"SELL"}: เลื่อน SL ตามกรอบ 10 วัน ${fmt(sym,old)} → ${fmt(sym,ext)} (ถ้าโดนตอนนี้ สุทธิ ≈ ${money(netAtPx(p,ext),true)} USD)`)}}
+    if(r.d)dtEnter(sym,r,now-(dayT+86400))}}
+function dtEnter(sym,r,lateS){const c=SYMS[sym],dirTxt=r.d>0?"BUY":"SELL",tag=`📈 เทรนด์รายวัน ${c.name} ${dirTxt}`;
+  if(S.bot.mode==="off"||!botTrades(sym))return;
+  if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===sym))return;
+  if(S.bot.mode==="signal"){toast(`📣 ${tag} (ทะลุกรอบ 55 วัน)`);notify(`เทรนด์รายวัน: ${dirTxt} ${c.name}`,"ทะลุกรอบ 55 วัน");return}
+  if(lateS>DT.staleH*3600){learn(`${tag}: ข้าม เพราะเปิดแอปช้า ${(lateS/3600).toFixed(1)} ชม. หลังแท่งวันปิด (ราคาเปลี่ยนไปจากที่ทดสอบไว้)`);return}
+  const px=M[sym].last;if(px==null)return;const stop=r.c-r.d*r.dist;
+  if(r.d>0?px<=stop:px>=stop){learn(`${tag}: ข้าม ราคาตอนนี้เลยจุด SL ไปแล้ว`);return}
+  const g=guardian();renderGuard(g);if(!g.ok)return;
+  const openRisk=S.acct.positions.filter(p=>p.by==="bot"&&SYMS[p.sym].grp==="CR").reduce((x,p)=>x+((p.meta&&p.meta.riskPct)||1)/100,0);
+  const risk=Math.min(DT.risk,0.02-openRisk,nonUsRiskRoom()/100);
+  if(risk<0.0025){learn(`${tag}: ข้าม ความเสี่ยงรวม Crypto เต็ม (${(openRisk*100).toFixed(2)}% จากเพดาน 2%)`);return}
+  if(!botRoom(sym,risk*100))return;
+  const slD=Math.abs(px-stop),perUnit=(slD+costPx(sym))*usdPerQuote(sym,px);let size=equity()*risk/perUnit/c.lot;if(!(size>0))return;
+  const m1=marginUsd({sym,size:1,entry:px}),freeM=equity()-usedMargin();if(m1>0)size=Math.min(size,0.25*freeM/m1);if(size<(c.step||0.01))return;
+  const pos=openPos(sym,r.d,size,slD/c.pip,0,"bot",{strat:"📈 1D Donchian 55/10",dt:1,tf:1440,riskPct:+(risk*100).toFixed(3)});
+  if(pos){pos.sl=stop;pos.risk=(Math.abs(pos.entry-stop)+costPx(sym,pos.entry))*units(sym,pos.size)*usdPerQuote(sym,pos.entry); /* stop exactly at the tested level (entry slippage does not move it) */
+    const act=pos.risk>0?pos.risk/equity()*100:risk*100;pos.meta.riskPct=+act.toFixed(3);save();
+    learn(`${tag} @ ${fmt(sym,pos.entry)} · ทะลุกรอบ 55 วัน · SL ${fmt(sym,pos.sl)} (กรอบ 10 วัน) · ไม่มี TP ปล่อยวิ่ง เลื่อน SL ทุกวัน · เสี่ยง ${pos.meta.riskPct.toFixed(2)}%`)}}
+function dtPanel(){const H=S.acct.history.filter(t=>t.strat==="📈 1D Donchian 55/10"&&!t.manual),O=S.acct.positions.filter(p=>p.meta&&p.meta.dt);
+  const n=H.length,R=H.filter(t=>t.R!=null).map(t=>t.R),mR=R.length?R.reduce((x,y)=>x+y,0)/R.length:0,net=H.reduce((x,t)=>x+t.net,0);
+  return `<div style="border:1px solid var(--line);padding:10px;border-radius:6px;margin-bottom:12px"><b>📈 เทรนด์รายวัน (Donchian 55/10) · Crypto 9 เหรียญ</b>
+   <button class="btn" id="dtToggle" style="margin-left:8px">${S.dtr.on?"✅ ใช้อยู่ (กดเพื่อปิด)":"⏸ ปิดอยู่ (กดเพื่อใช้)"}</button>
+   <div class="note" style="margin:6px 0">ทุกวัน 07:00 น. (แท่งวันปิด): ปิดเหนือ High 55 วัน → BUY · ต่ำกว่า Low 55 วัน → SELL · SL = กรอบ 10 วัน (อย่างน้อย 1 ATR) · ไม่มี TP · เลื่อน SL ตามกรอบ 10 วันทุกวัน · เสี่ยง 0.5%/ไม้ อยู่ในเพดานเดียวกับบอทอื่น (Crypto ≤ 2%, รวม ≤ 5%, Guardian) · ถ้าเปิดแอปช้าเกิน 12 ชม. หลังแท่งวันปิดจะข้ามไม้นั้น<br>
+   ผ่านด่าน walk-forward ที่ตั้งเกณฑ์ไว้ก่อน (2021–พ.ย. 2025: Sharpe 0.92, ขอบล่าง 95% > 0, 199 ไม้, ชนะ 43%, ได้เฉลี่ย 2.7 เท่าของที่เสีย) และ 12 เดือนล่าสุดที่กันไว้ไม่แตะ: +4.7% (Sharpe 0.93, ลงลึกสุด 2.8%) ขณะที่ถือเฉยๆ −44% · ผลจริงในอนาคตอาจต่างจากนี้</div>
+   <div>เปิดอยู่ ${O.length} ไม้ · ปิดแล้ว ${n} ไม้${n?` · เฉลี่ย ${mR>=0?"+":""}${mR.toFixed(2)}R · สุทธิ ${money(net,true)} USD`:""}</div></div>`}
+document.addEventListener("click",e=>{if(e.target&&e.target.id==="dtToggle"){S.dtr.on=!S.dtr.on;save();learn(S.dtr.on?"📈 เปิดบอทเทรนด์รายวัน":"📈 ปิดบอทเทรนด์รายวัน (ไม้ที่เปิดอยู่ยังมี SL ตามเดิม แต่จะไม่เลื่อน SL ต่อ)");renderBrain()}});
 
 /* ===================== v0.6.2: forex candles survive reloads + history backfill ===================== */
 /* Forex had no history source: bars were built only from live ticks and lost on every reload, so the 15m chart looked empty. */
@@ -1101,7 +1152,7 @@ if(new URLSearchParams(location.search).has("selftest")) window.__selftest=true;
 setInterval(renderBanner,3000);
 {const usHelp=()=>{try{const e=$("usHrsHelp");if(e)e.textContent="ตอนนี้: "+usHoursTxt()}catch(x){}};usHelp();setInterval(()=>{usHelp();try{if($("t-brain").classList.contains("on"))renderBrain()}catch(x){}},60000)} /* v0.8.3 */
 setInterval(()=>{try{const el=document.getElementById("fxState");if(el&&!fxOpenNow()&&!/ตลาดปิด/.test(el.textContent))el.textContent+=" · ตลาดปิด"}catch(e){}},5000); /* v0.6.9 */
-if(!window.__selftest){cbLoadScript();setInterval(cbLoadScript,15*60*1000);setTimeout(cloudTick,8000);setInterval(cloudTick,60*1000);}
+if(!window.__selftest){cbLoadScript();setInterval(cbLoadScript,15*60*1000);setTimeout(cloudTick,8000);setInterval(cloudTick,60*1000);setTimeout(dtTick,15000);setInterval(dtTick,5*60*1000);} /* v0.9.8 daily trend bot */
 if(S.bot.migr52!=null&&!S.bot.migr52logged){S.bot.migr52logged=1;learn(`อัปเดต v0.5.2: ไม้เงาเดิมไม่ได้หักค่าธรรมเนียม 0.1%/ข้าง สถิติเก่า ${S.bot.migr52} กลยุทธ์ถูกเก็บไว้ดูย้อนหลัง พารามิเตอร์/แชมป์เดิมยังอยู่ เริ่มวัดผลใหม่หลังหักต้นทุนจริง · ขนาดไม้คิดความเสี่ยง 1% รวมสเปรด+ค่าธรรมเนียม`)}
 if(!S.bot.log.length) learn(`เริ่มต้น ${VERSION}: 4 ตระกูลกลยุทธ์พร้อมเทรดเงา · Guardian เสี่ยง ${S.settings.risk}%/ไม้ เพดานขาดทุน ${S.settings.dayLoss}%/วัน`);
 if(!S.bot.v92){S.bot.v92=1;let k=0;for(const t of S.acct.history)if(t.by==="bot"&&t.reason==="มือ"&&!t.manual){t.manual=1;k++}if(k)learn(`อัปเดต v0.9.2: ไม้บอท ${k} ไม้ที่คุณเคยปิดเอง ถูกแยกออกจากสถิติบอทแล้ว (เงินในบัญชีไม่เปลี่ยน)`)}
