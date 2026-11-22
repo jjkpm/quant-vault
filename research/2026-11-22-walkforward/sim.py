@@ -28,11 +28,12 @@ def walk(sig, pol):
         if tp is not None and ((h >= tp) if d > 0 else (l <= tp)):
             return t0 + 900, banked + w * (tp - e) * d / r - cR, "TP"
         best = max(best, h) if d > 0 else min(best, l)
-        if not moved and ((best >= e + r) if d > 0 else (best <= e - r)):
-            if part:  # bank half at +1R
-                banked += 0.5 * 1.0; w = 0.5
+        trig = pol.get("trig", 1.0); lock = pol.get("lock", Q.BE_LOCK)
+        if not moved and ((best >= e + trig * r) if d > 0 else (best <= e - trig * r)):
+            if part:  # bank half at the trigger
+                banked += 0.5 * trig; w = 0.5
             if be or trail or part:
-                sl = e + d * Q.BE_LOCK * r; moved = True
+                sl = e + d * lock * r; moved = True
         if moved and trail:
             nsl = best - d * trail * r
             if (nsl > sl) if d > 0 else (nsl < sl): sl = nsl

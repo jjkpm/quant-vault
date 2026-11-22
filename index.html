@@ -225,7 +225,7 @@ dialog .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 
 <script>
 "use strict";
-const VERSION="v0.9.8 · 2026-11-22";
+const VERSION="v0.9.9 · 2026-11-22";
 document.getElementById("ver").textContent=VERSION;
 
 /* ===================== instruments ===================== */
@@ -615,6 +615,7 @@ function botAct(sym,fired,A){
   const pick=fired.filter(f=>pickable(f.ag,maxW)&&(SYMS[sym].grp!=="US"||f.s>0)).sort((x,y)=>y.ag.w-x.ag.w)[0]; /* v0.8.0: US stocks long only */
   if(!pick) return;
   const name=FAM[pick.ag.fam].label, dirTxt=pick.s>0?"BUY":"SELL";
+  if(provenOnly()){shadowNote(sym,`🧠 สมองในเครื่อง (${name}) ${dirTxt}`);return} /* v0.9.9 */
   if(S.bot.mode==="signal"){toast(`📣 สัญญาณ ${dirTxt} ${SYMS[sym].name} จาก ${name} (น้ำหนัก ${pick.ag.w.toFixed(2)})`);notify(`สัญญาณ ${dirTxt} ${SYMS[sym].name}`,name);return}
   const g=guardian(); renderGuard(g); if(!g.ok) return;
   if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===sym)) return; /* one bot position per symbol */
@@ -973,6 +974,7 @@ function cbAct(sym,tf,r,B){
   B=B||S.cloud.brain;const mk=B.market==="mk";   /* v0.9.0: same execution for the stocks/forex swarm */
   if(mk&&(!tradable(sym,"bot")||(SYMS[sym].grp==="US"&&r.d<0)))return;
   const c=SYMS[sym],dirTxt=r.d>0?"BUY":"SELL",who=r.side.slice(0,6).map(a=>a.id).join(",");
+  if(provenOnly()){shadowNote(sym,`${mk?"☁️📈":"☁️"} ฝูงบอท ${tf}m ${dirTxt}`);return} /* v0.9.9 */
   if(S.bot.mode==="signal"){toast(`📣 ☁️ ฝูงบอท: ${dirTxt} ${c.name} ${tf}m (คะแนนโหวต ${r.score.toFixed(2)})`);notify(`ฝูงบอท: ${dirTxt} ${c.name}`,`${tf}m · ${who}`);return}
   const g=guardian();renderGuard(g);if(!g.ok)return;
   if(S.acct.positions.some(p=>p.by==="bot"&&p.sym===sym))return;
@@ -1024,6 +1026,14 @@ document.addEventListener("click",e=>{if(e.target&&e.target.id==="cbToggle"){S.c
    Rules: at each daily close (07:00 BKK) close > 55-day high → BUY, close < 55-day low → SELL · stop = 10-day channel (min 1 ATR20)
    · no TP (let it run) · after every daily close the stop moves to the 10-day channel, only in the trade's favour · risk 0.5 %/trade
    inside the same caps as every bot (Crypto open risk ≤ 2 %, all bots ≤ 5 %, Guardian, 1 position per coin). */
+/* v0.9.9: real trades only from bots that passed the walk-forward gate (today: 📈 daily trend). The 15m/1h/4h swarms and the local
+   brain lost −0.18…−0.20R per trade after costs in a 9-month production replay, so they keep learning in the shadows and send no
+   real orders or signals until a strategy of theirs passes the same gate. Positions already open keep their SL/TP. */
+S.proven=S.proven===undefined?true:S.proven;
+function provenOnly(){return S.proven!==false} /* missing flag (reset/import) = safe default */
+function shadowNote(sym,who){const k="pv_"+sym;if(S.bot[k]&&Date.now()-S.bot[k]<3600e3)return;S.bot[k]=Date.now();
+  learn(`⏸ ${who} ${SYMS[sym].name}: ยังไม่ผ่านด่าน walk-forward → ไม่เข้าไม้จริง (ฝึกเงาต่อ)`)}
+document.addEventListener("click",e=>{if(e.target&&e.target.id==="pvToggle"){S.proven=!S.proven;save();learn(S.proven?"🔒 เทรดจริงเฉพาะบอทที่ผ่านด่าน":"🔓 ให้ฝูงบอท/สมองในเครื่องกลับมาเทรดจริง (ยังไม่ผ่านด่าน)");renderBrain()}});
 S.dtr=S.dtr||{on:true,lastDay:{}};
 const DT={N:55,M:10,atr:20,risk:0.005,staleH:12};
 function dtSig(b){const k=b.length-1;if(k<Math.max(DT.N,DT.atr)+1)return null;
@@ -1061,7 +1071,10 @@ function dtEnter(sym,r,lateS){const c=SYMS[sym],dirTxt=r.d>0?"BUY":"SELL",tag=`�
     learn(`${tag} @ ${fmt(sym,pos.entry)} · ทะลุกรอบ 55 วัน · SL ${fmt(sym,pos.sl)} (กรอบ 10 วัน) · ไม่มี TP ปล่อยวิ่ง เลื่อน SL ทุกวัน · เสี่ยง ${pos.meta.riskPct.toFixed(2)}%`)}}
 function dtPanel(){const H=S.acct.history.filter(t=>t.strat==="📈 1D Donchian 55/10"&&!t.manual),O=S.acct.positions.filter(p=>p.meta&&p.meta.dt);
   const n=H.length,R=H.filter(t=>t.R!=null).map(t=>t.R),mR=R.length?R.reduce((x,y)=>x+y,0)/R.length:0,net=H.reduce((x,t)=>x+t.net,0);
-  return `<div style="border:1px solid var(--line);padding:10px;border-radius:6px;margin-bottom:12px"><b>📈 เทรนด์รายวัน (Donchian 55/10) · Crypto 9 เหรียญ</b>
+  return `<div style="border:1px solid var(--line);padding:10px;border-radius:6px;margin-bottom:12px"><b>${S.proven?"🔒 เทรดจริงเฉพาะบอทที่ผ่านด่าน":"🔓 ทุกบอทเทรดจริง"}</b>
+   <button class="btn" id="pvToggle" style="margin-left:8px">${S.proven?"เปิดอยู่ (กดเพื่อให้ฝูงบอทกลับมาเทรดจริง)":"ปิดอยู่ (กดเพื่อเทรดเฉพาะที่ผ่านด่าน)"}</button>
+   <div class="note" style="margin-top:6px">ฝูงบอท 15m/1h/4h และสมองในเครื่อง ทดสอบย้อนหลัง 9 เดือนแบบเดียวกับที่รันจริง: −0.18…−0.20R/ไม้หลังต้นทุน → ไม่ส่งไม้จริง/สัญญาณ แต่ยังฝึกเงาต่อทุกตัว · ไม้ที่เปิดอยู่แล้วยังมี SL/TP ตามเดิม</div></div>
+   <div style="border:1px solid var(--line);padding:10px;border-radius:6px;margin-bottom:12px"><b>📈 เทรนด์รายวัน (Donchian 55/10) · Crypto 9 เหรียญ</b>
    <button class="btn" id="dtToggle" style="margin-left:8px">${S.dtr.on?"✅ ใช้อยู่ (กดเพื่อปิด)":"⏸ ปิดอยู่ (กดเพื่อใช้)"}</button>
    <div class="note" style="margin:6px 0">ทุกวัน 07:00 น. (แท่งวันปิด): ปิดเหนือ High 55 วัน → BUY · ต่ำกว่า Low 55 วัน → SELL · SL = กรอบ 10 วัน (อย่างน้อย 1 ATR) · ไม่มี TP · เลื่อน SL ตามกรอบ 10 วันทุกวัน · เสี่ยง 0.5%/ไม้ อยู่ในเพดานเดียวกับบอทอื่น (Crypto ≤ 2%, รวม ≤ 5%, Guardian) · ถ้าเปิดแอปช้าเกิน 12 ชม. หลังแท่งวันปิดจะข้ามไม้นั้น<br>
    ผ่านด่าน walk-forward ที่ตั้งเกณฑ์ไว้ก่อน (2021–พ.ย. 2025: Sharpe 0.92, ขอบล่าง 95% > 0, 199 ไม้, ชนะ 43%, ได้เฉลี่ย 2.7 เท่าของที่เสีย) และ 12 เดือนล่าสุดที่กันไว้ไม่แตะ: +4.7% (Sharpe 0.93, ลงลึกสุด 2.8%) ขณะที่ถือเฉยๆ −44% · ผลจริงในอนาคตอาจต่างจากนี้</div>
